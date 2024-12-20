@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from pathlib import Path
 
 # import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
@@ -18,8 +19,12 @@ EQU_EL_DIV_CORRECTION = 1.397839912270349316e00
 # --------------------------------------------------------- #
 # GLobal files definition                                   #
 # --------------------------------------------------------- #
-S1002_profile = np.loadtxt(".\Profiles\Wheel_Profiles\S1002.txt", delimiter=",")
-UIC60_profile = np.loadtxt(r".\Profiles\Rail_Profiles\UIC60.txt", delimiter=",")
+root = Path.cwd()
+profiles_path = root.joinpath("Profiles")
+wheel_path = profiles_path.joinpath("Wheel_Profiles"+os.sep+"S1002.txt")
+rail_path = profiles_path.joinpath("Rail_Profiles"+os.sep+"UIC60.txt")
+S1002_profile = np.loadtxt(wheel_path, delimiter=",")
+UIC60_profile = np.loadtxt(rail_path, delimiter=",")
 
 # class datawheel:
 #     def __init__(

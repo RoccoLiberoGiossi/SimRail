@@ -98,16 +98,22 @@ class wheel:
             raise TypeError("new_state must be an instance of dynamic_state")
 
     def calculate_position(self):
-        temp_profile = self.calculate_yaw()
+        temp_profile = self.calculate_yaw(self.wheel_start_pos)
         temp_profile[:, 0] = temp_profile[:, 0] + self.dynamic_state.state_y
         temp_profile[:, 1] = temp_profile[:, 1] + self.dynamic_state.state_z
 
         self.wheel_profile_pos = temp_profile
         self.wheel_angle = self.calc_wheel_angle()
 
-    def calculate_yaw(self):
-        pos_yawed = np.zeros([len(self.wheel_start_pos), 2])
-        pos_yawed[:, 0] = (self.wheel_start_pos[:, 0]) * np.cos(
+        temp_profile = self.calculate_yaw(self.wheel_start_radius)
+        temp_profile[:, 0] = temp_profile[:, 0] + self.dynamic_state.state_y
+        temp_profile[:, 1] = temp_profile[:, 1] + self.r0
+
+        self.wheel_radius = temp_profile
+    
+    def calculate_yaw(self, profile_to_convert):
+        pos_yawed = np.zeros([len(profile_to_convert), 2])
+        pos_yawed[:, 0] = (profile_to_convert[:, 0]) * np.cos(
             self.dynamic_state.state_yaw
         ) - self.wheel_start_radius[:, 1] * np.tan(self.wheel_start_angle) * (
             np.sin(self.dynamic_state.state_yaw)
@@ -127,9 +133,9 @@ class wheel:
         )
 
         return pos_yawed
-
+    
     def calculate_roll():
-        # TO DO
+        # TODO add function to do roll rotation calculation
         pass
 
 
@@ -145,6 +151,7 @@ class rail:
         self.rail_rotated = self.rotate_profile()
         self.gauge_corner = np.where(self.rail_rotated[:, 1] <= 0.014)[0]
         self.rail_start_pos = self.set_start_post()
+        self.rail_profile_pos = self.rail_start_pos
 
     def rotate_profile(self):
         rotation_Z = np.array(
