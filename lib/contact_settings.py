@@ -2,9 +2,7 @@ import os
 import numpy as np
 from pathlib import Path
 
-# import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
-from scipy.optimize import shgo
 from scipy import interpolate
 
 # --------------------------------------------------------- #

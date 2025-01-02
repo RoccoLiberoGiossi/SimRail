@@ -231,7 +231,7 @@ def contact_forces(
     )
     # missing the equivalent WheelAngleCentroid
     contact_model.Q_force = contact_model.normal_force * np.cos(ContactRotationAngle)
-    contact_model.Y_force = contact_model.normal_force * np.cos(ContactRotationAngle)
+    contact_model.Y_force = contact_model.normal_force * np.sin(ContactRotationAngle)
 
     # Keep it here for momentarly back_up
     # SearchPath.WheelAngle = WheelAngleCentroid
@@ -257,8 +257,6 @@ def contact_forces(
 
     # return QForce
 
-
-# deltaz -> need to put this outside togeter with dy of the search. They must be incorporated in the update state
 def patch_search(Wheel, Rail, material_model, contact_patches, discretization=58):
 
     if not isinstance(Wheel, wheel):

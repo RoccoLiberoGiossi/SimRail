@@ -8,14 +8,9 @@ from lib.contact_material import material
 from lib.contact_methods import eqv_el_normal_contact
 
 
-# TODO consider move this from here. It should be in a more globally accessible place
+# TODO move this from here. It should be in a more globally accessible place
 def calc_global_force(contact_patches):
-
-    total_force = 0
-    for counter in range(len(contact_patches)):
-        total_force += contact_patches[counter].Q_force
-
-    return total_force
+    return sum(patch.Q_force for patch in contact_patches)
 
 
 def iterative_Q_search(
@@ -57,25 +52,25 @@ def static_contact(
     if not isinstance(material_model, material):
         raise TypeError("Error in contact forces calculation: no material provided")
 
-    result_state = []
+    result_state = {}
+    for jj in range(len(contact_patches)):
+        result_state[f"patch_{jj}"] = []
 
     new_state = dynamic_state()
 
     dz0_prew = 0
 
-    for deltyIndx in range(len(deltays)):
+    for deltyIndx, deltay in enumerate(deltays):
 
-        new_state.state_y = deltays[deltyIndx]
+        new_state.state_y = deltay
         Wheel.set_dynamic_state(new_state)
         Wheel.calculate_position()
 
         if deltyIndx == 0 and Wheel.lr == RIGHT:
-            # Dz0 = 0.0005
             Dz0 = 0.002
         elif deltyIndx == 0 and Wheel.lr == LEFT:
-            pass
+            Dz0 = 0.008
         else:
-            # Dz0 = result_state[deltyIndx - 1, 0]
             Dz0 = dz0_prew
 
         root = fsolve(
@@ -118,15 +113,30 @@ def static_contact(
 
         dz0_prew = root
 
-        result_state_0 = [
-            float(root),
-            float(contact_patches[0].normal_force),
-            float(contact_patches[0].Q_force),
-            float(contact_patches[0].approach),
-            float(contact_patches[0].semi_axis_a),
-            float(contact_patches[0].semi_axis_b),
-        ]
+        # result_state_0 = [
+        #     float(root),
+        #     float(contact_patches[0].normal_force),
+        #     float(contact_patches[0].Q_force),
+        #     float(contact_patches[0].approach),
+        #     float(contact_patches[0].semi_axis_a),
+        #     float(contact_patches[0].semi_axis_b),
+        # ]
 
-        result_state.append(result_state_0)
+        for jj in range(len(contact_patches)):
+            result_state_patch = [
+                float(root),
+                float(contact_patches[jj].normal_force),
+                float(contact_patches[jj].Q_force),
+                float(contact_patches[jj].Y_force),
+                float(contact_patches[jj].approach),
+                float(contact_patches[jj].semi_axis_a),
+                float(contact_patches[jj].semi_axis_b),
+            ]
+            result_state[f"patch_{jj}"].append(result_state_patch)
 
-    return np.array(result_state)
+        # result_state.append(result_state_0)
+
+    for jj in range(len(contact_patches)):
+        result_state[f"patch_{jj}"] = np.array(result_state[f"patch_{jj}"])
+
+    return result_state
