@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 
 from scipy.optimize import fsolve
+from scipy.integrate import simpson
 from scipy import interpolate
 
 # --------------------------------------------------------- #

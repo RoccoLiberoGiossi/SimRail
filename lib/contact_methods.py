@@ -43,3 +43,25 @@ class eqv_el_normal_contact(normal_contact):
     def reset_to_zero(self):
         for attribute in vars(self):
             setattr(self, attribute, 0)
+
+class kik_pyo_normal_contact(normal_contact):
+    def __init__(
+        self,
+        pressure_0 = 0,
+        integral_D1 = 0,
+        integral_D3 = 0,
+        x_patch = [],
+        y_patch = [],
+        pressure_patch = [],
+    ):
+        super().__init__()
+        self.pressure_0 = pressure_0
+        self.integral_D1 = integral_D1
+        self.integral_D3 = integral_D3
+        self.x_patch = x_patch
+        self.y_patch = y_patch
+        self.pressure_patch = pressure_patch
+
+    def reset_to_zero(self):
+        for attribute in vars(self):
+            setattr(self, attribute, 0)
