@@ -1,6 +1,6 @@
 from lib.contact_settings import *
-from lib.contact_wheel_rail import wheel, rail
-from lib.contact_methods import eqv_el_normal_contact, kik_pyo_normal_contact
+from lib.geoLib.contact_wheel_rail import wheel, rail
+from lib.normLib.contact_methods import eqv_el_normal_contact, kik_pyo_normal_contact
 from lib.contact_material import material
 
 

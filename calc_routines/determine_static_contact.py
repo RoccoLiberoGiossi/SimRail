@@ -1,12 +1,12 @@
 import numpy as np
 from lib.contact_settings import *
-from lib.contact_dyn_state import dynamic_state
-from lib.contact_solver import patch_search
+from lib.dynLib.contact_dyn_state import dynamic_state
+from lib.normLib.contact_solver import patch_search
 from tqdm import tqdm
 
-from lib.contact_wheel_rail import wheel, rail
+from lib.geoLib.contact_wheel_rail import wheel, rail
 from lib.contact_material import material
-from lib.contact_methods import eqv_el_normal_contact, kik_pyo_normal_contact
+from lib.normLib.contact_methods import eqv_el_normal_contact, kik_pyo_normal_contact
 
 
 # TODO move this from here. It should be in a more globally accessible place

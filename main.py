@@ -1,4 +1,4 @@
-from lib.contact_wheel_rail import wheel, rail
+from lib.geoLib.contact_wheel_rail import wheel, rail
 from lib.contact_settings import *
 
 def main():

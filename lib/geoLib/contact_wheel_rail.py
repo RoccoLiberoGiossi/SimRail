@@ -1,5 +1,5 @@
 from lib.contact_settings import *
-from lib.contact_dyn_state import dynamic_state
+from lib.dynLib.contact_dyn_state import dynamic_state
 
 # --------------------------------------------------------- #
 # Define wheel and rail parameters                          #
@@ -95,7 +95,7 @@ class wheel:
         if isinstance(new_state, dynamic_state):
             self.dynamic_state = new_state
         else:
-            raise TypeError("new_state must be an instance of dynamic_state")
+            raise TypeError(f"new_state must be an instance of dynamic_state, {type(new_state)}")
 
     def calculate_position(self):
         temp_profile = self.calculate_yaw(self.wheel_start_pos)
