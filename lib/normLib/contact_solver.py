@@ -77,7 +77,7 @@ def calculate_contact_kik_pyo(
     material_model,
     discretization,
 ):
-    
+
     # Define approaches based on the maximum Shape value
     max_shape = np.max(WheelCoorLocalNormal - RailCoorLocalNormal)
     approach_0 = 0.55 * max_shape
@@ -88,7 +88,10 @@ def calculate_contact_kik_pyo(
 
     # Adjusting Shape for the Kik-Piotrowski method
     Shape_kik_pyo = np.where(Shape > 0, Shape, 0)
-    # xl = np.sqrt(2 * Rlocal * Shape_kik_pyo)
+    # TODO: when rreshaping the kik_pyo approach the patch may divide into two.
+    # It will be needed to account and rescale the patches. Probably need to reshape
+    # the functions so that the distinction between kik_pyo and eq will be done previously.
+
     xl = np.sqrt(2 * Rlocal * Shape_kik_pyo)
     yl = LocalX
 
@@ -338,30 +341,7 @@ def contact_forces(
     # missing the equivalent WheelAngleCentroid
     contact_model.Q_force = contact_model.normal_force * np.cos(ContactRotationAngle)
     contact_model.Y_force = contact_model.normal_force * np.sin(ContactRotationAngle)
-
-    # Keep it here for momentarly back_up
-    # SearchPath.WheelAngle = WheelAngleCentroid
-    # SearchPath.approach = approach
-    # SearchPath.NormalForce = NormalForceHertz
-    # SearchPath.QForce = QForce
-    # SearchPath.Deltaz = deltaz
-    # SearchPath.centroid = centroidWheel - Search1.DyWheeslet
-    # SearchPath.DyWheel = centroidWheel - Search1.DyWheeslet
-    # SearchPath.a = aHertzCorrected
-    # SearchPath.b = bHertzCorrected
-    # SearchPath.AHertz = AHertz
-    # SearchPath.BHertz = BHertz
-    # SearchPath.rWy = WheelCoorLocalNormal
-    # SearchPath.rWx = RailCoorLocalNormal
-    # SearchPath.rRy = LocalX
-    # SearchPath.tetaHertz = TetaHertz
-    # SearchPath.ratioHertz = ratioHertz
-    # SearchPath.DyRail = centroidRail
-    # SearchPath.StartPos = yl[0] + Rail[contact_indexes[0], 0] - Search1.DyWheeslet
-    # SearchPath.EndPos = yl[-1] + Rail[contact_indexes[0], 0] - Search1.DyWheeslet
-    # SearchPath.Radius = centroidRadius  # Rlocal*np.cos(ContactRotationAngle)
-
-    # return QForce
+    contact_model.contact_angle = ContactRotationAngle
 
 
 def patch_search(Wheel, Rail, material_model, contact_patches, discretization=58):

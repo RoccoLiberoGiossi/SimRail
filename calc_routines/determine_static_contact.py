@@ -77,7 +77,6 @@ def static_contact(
         Wheel.calculate_position()
 
         if deltyIndx == 0 and Wheel.lr == RIGHT:
-            # Dz0 = 0.0002
             Dz0 = 0.002
         elif deltyIndx == 0 and Wheel.lr == LEFT:
             Dz0 = 0.008
@@ -108,7 +107,6 @@ def static_contact(
                     args=(new_state, Wheel, Rail, material_model, contact_patches),
                 )
             Qout = calc_global_force(contact_patches)
-            # Dz0 = root
             iteration = iteration + 1
 
         iterative_Q_search(
