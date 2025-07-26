@@ -12,5 +12,5 @@ class material:
         # this must be modified in case the wheel and the rail have two different materials
         # this supposed that wheel and rail are the same
         self.Estar = 1 / ((1 + self.Shear_Modulus**2) / self.Elastic_Modulus * 2)
-        self.kik_pyo_constant = np.pi*self.Estar/2/(1-self.Shear_Modulus**2)
+        self.kik_pio_constant = np.pi*self.Estar/2/(1-self.Shear_Modulus**2)
         self.G = self.Elastic_Modulus / (2 * (1 + self.Shear_Modulus))

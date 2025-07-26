@@ -1,394 +1,270 @@
 from lib.contact_settings import *
 from lib.geoLib.contact_wheel_rail import wheel, rail
-from lib.normLib.contact_methods import eqv_el_normal_contact, kik_pyo_normal_contact
+from lib.normLib.contact_methods import eqv_el_normal_contact, kik_pio_normal_contact
 from lib.contact_material import material
 
+class NormalContactSolver:
+    def __init__(
+        self,
+        contact_model: Union[eqv_el_normal_contact, kik_pio_normal_contact],
+        numer_of_patches: int = 3,
+    ):
 
-def findAlpha(alpha, Area, Width):
-    Res = Area - 0.5 * Width**2 / 4 * (alpha - np.sin(alpha)) / (np.sin(alpha / 2) ** 2)
-    return Res
+        if not isinstance(numer_of_patches, int):
+            raise TypeError(
+                "Error in contact forces calculation: numer_of_patches is not an integer"
+            )
+        
+        if not isinstance(contact_model, (eqv_el_normal_contact, kik_pio_normal_contact)):
+            raise TypeError("Error in contact forces calculation: no contact model provided")
+        
+        self.contact_model = contact_model
+        
+        if isinstance(self.contact_model, eqv_el_normal_contact):
+            self.n_patches = numer_of_patches
+            self.contact_patches = [type(self.contact_model)() for _ in range(self.n_patches)]
+        elif isinstance(self.contact_model, kik_pio_normal_contact):
+            self.n_patches = numer_of_patches * 3
+            self.contact_patches = [type(self.contact_model)() for _ in range(self.n_patches)]
 
+    def patch_search(
+        self,
+        Wheel: wheel,
+        Rail: rail,
+        material_model: material,
+        discretization: int = 58
+    ):
 
-def calculate_contact_eqv(
-    contact_model,
-    LocalX,
-    WheelCoorLocalNormal,
-    RailCoorLocalNormal,
-    Rlocal,
-    material_model,
-):
+        if not isinstance(Wheel, wheel):
+            raise TypeError("Error in contact forces calculation: wheel not given")
 
-    Shape = WheelCoorLocalNormal - RailCoorLocalNormal
+        if not isinstance(Rail, rail):
+            raise TypeError("Error in contact forces calculation: rail not given")
 
-    Width = np.abs(LocalX[0] - LocalX[-1])
-    Area = np.trapz(Shape, LocalX)
-    root = fsolve(findAlpha, np.pi / 100, args=(Area, Width))
-    alpha = root
-    RadiusEqv = Width / 2 / np.sin(alpha / 2)
-    approach_0 = RadiusEqv * 2 * np.sin(alpha / 4) ** 2
-    contact_model.approach = approach_0 / 0.55
+        if not isinstance(material_model, material):
+            raise TypeError("Error in contact forces calculation: no material provided")
 
-    xl = np.sqrt(2 * Rlocal * Shape)
-    yl = LocalX
-
-    contact_model.semi_axis_a = np.max(xl)
-    contact_model.semi_axis_b = np.abs(yl[-1] - yl[0]) / 2
-
-    contact_model.A_Hertz = contact_model.approach / (contact_model.semi_axis_a) ** 2
-    contact_model.B_Hertz = contact_model.approach / (contact_model.semi_axis_b) ** 2
-
-    centroid = 1 / np.trapz(xl, yl) * np.trapz((yl) * xl, yl)
-
-    contact_model.teta_Hertz = (
-        np.arccos(
-            (contact_model.A_Hertz - contact_model.B_Hertz)
-            / (contact_model.A_Hertz + contact_model.B_Hertz)
+        if not isinstance(discretization, int):
+            raise TypeError(
+                "Error in contact forces calculation: discretization is not an integer"
+            )
+        
+        WheelInt = np.interp(
+            Rail.rail_profile_pos[:, 0],
+            Wheel.wheel_profile_pos[:, 0],
+            Wheel.wheel_profile_pos[:, 1],
         )
-        * 180
-        / np.pi
-    )
-
-    contact_model.ratio_Hertz = (
-        np.sqrt(1 - (contact_model.teta_Hertz - 90) ** 2 / (90**2))
-        ** (EQU_EL_POWER_CORRECTION)
-        / EQU_EL_DIV_CORRECTION
-    )
-
-    contact_model.normal_force = (
-        4
-        / 3
-        * material_model.Estar  # I don't like it like this since it has to go around
-        * np.sqrt(
-            1
-            / (contact_model.A_Hertz + contact_model.B_Hertz)
-            * (contact_model.approach / contact_model.ratio_Hertz) ** 3
-        )
-    )
-
-    return centroid
-
-
-def calculate_contact_kik_pyo(
-    contact_model,
-    LocalX,
-    WheelCoorLocalNormal,
-    RailCoorLocalNormal,
-    Rlocal,
-    material_model,
-    discretization,
-):
-
-    # Define approaches based on the maximum Shape value
-    max_shape = np.max(WheelCoorLocalNormal - RailCoorLocalNormal)
-    approach_0 = 0.55 * max_shape
-    approach_1 = 0.45 * max_shape
-
-    WheelCoorLocalNormal_kik_pyo = WheelCoorLocalNormal - approach_1
-    Shape = WheelCoorLocalNormal_kik_pyo - RailCoorLocalNormal
-
-    # Adjusting Shape for the Kik-Piotrowski method
-    Shape_kik_pyo = np.where(Shape > 0, Shape, 0)
-    # TODO: when rreshaping the kik_pyo approach the patch may divide into two.
-    # It will be needed to account and rescale the patches. Probably need to reshape
-    # the functions so that the distinction between kik_pyo and eq will be done previously.
-
-    xl = np.sqrt(2 * Rlocal * Shape_kik_pyo)
-    yl = LocalX
-
-    # Calculate the centroid
-    xl_integral = np.trapz(xl, yl)
-    centroid = np.trapz(yl * xl, yl) / xl_integral if xl_integral != 0 else 0
-
-    contact_model.approach = approach_0
-
-    # Create integration grid
-    x_integration = np.linspace(-np.max(xl), np.max(xl), discretization)
-    y_integration = np.linspace(yl[0] - centroid, yl[-1] - centroid, discretization)
-    xl_0 = np.interp(0, y_integration, xl)
-
-    # Preallocate arrays for integrals
-    search_matrix_1 = np.zeros((discretization, discretization))
-    search_matrix_3 = np.zeros((discretization, discretization))
-
-    # Calculate search matrices and integrals
-    for jj in range(discretization):
-        valid_x = (x_integration >= -xl[jj]) & (x_integration <= xl[jj])
-        search_matrix_1[jj, valid_x] = np.sqrt(
-            xl[jj] ** 2 - x_integration[valid_x] ** 2
-        )
-        search_matrix_3[jj, valid_x] = search_matrix_1[jj, valid_x] / np.sqrt(
-            (y_integration[jj] ** 2) + x_integration[valid_x] ** 2
+        radius = np.interp(
+            Rail.rail_profile_pos[:, 0],
+            Wheel.wheel_radius[:, 0],
+            Wheel.wheel_radius[:, 1],
         )
 
-    # Compute integral arrays
-    integralD1 = np.trapz(search_matrix_1, x_integration, axis=1)
-    integralD3 = np.trapz(search_matrix_3, x_integration, axis=1)
+        ContactPos = np.where((WheelInt - Rail.rail_profile_pos[:, 1]) > 0)[0]
 
-    # Aggregate results for D1 and D3
-    contact_model.integral_D1 = np.trapz(integralD1, y_integration)
-    contact_model.integral_D3 = np.trapz(integralD3, y_integration)
+        if len(ContactPos) > 2:
+            indices = np.where(np.diff(ContactPos) > 1)[0] + 1
+            ContactPosNs = np.split(ContactPos, indices)
+            ContactPosNs_sorted = sorted(ContactPosNs, key=len, reverse=True)
 
-    # Calculate normal force and pressure
-    contact_model.normal_force = (
-        material_model.kik_pyo_constant
-        * approach_0
-        / 0.55
-        * contact_model.integral_D1
-        / contact_model.integral_D3
-    )
-    contact_model.pressure_0 = (
-        contact_model.normal_force
-        * np.sqrt(2 * Rlocal * approach_0)
-        / contact_model.integral_D1
-    )
+            for counter in range(self.n_patches):
+                self.contact_patches[counter].reset_to_zero()
 
-    # Store the pressure distribution output
-    contact_model.x_patch = x_integration
-    contact_model.y_patch = y_integration
-    contact_model.pressure_patch = contact_model.pressure_0 / xl_0 * search_matrix_1
+            for counter in range(self.n_patches):
+                if counter < len(ContactPosNs_sorted):
+                    self.contact_forces(
+                        ContactPosNs_sorted[counter],
+                        Wheel,
+                        WheelInt,
+                        Rail,
+                        radius,
+                        discretization,
+                        counter,
+                        material_model,
+                    )
+        else:
+            for counter in range(self.n_patches):
+                self.contact_patches[counter].reset_to_zero()
 
-    return centroid
+    def contact_forces(
+        self,
+        contact_indexes: np.ndarray[int],
+        Wheel: wheel,
+        wheel_interp: np.ndarray[float],
+        Rail: rail,
+        radius_interp: np.ndarray[float],
+        discretization: int,
+        counter: int,
+        material_model: material,
+    ):
+        """contact_indexes = indexes of wheel and rail where interpenetration is found
+        Wheel = wheel object
+        wheel_interp = wheel segment interpolated over the rail
+        Rail = rail object
+        radius_interp = wheel radius segment interpolated over the rail
+        discretization = patch discretization as imposed by engineer"""
 
-
-def contact_forces(
-    contact_indexes,
-    Wheel,
-    wheel_interp,
-    Rail,
-    radius_interp,
-    discretization,
-    contact_model,
-    material_model,
-):
-    """contact_indexes = indexes of wheel and rail where interpenetration is found
-    Wheel = wheel object
-    wheel_interp = wheel segment interpolated over the rail
-    Rail = rail object
-    radius_interp = wheel radius segment interpolated over the rail
-    discretization = patch discretization as imposed by engineer"""
-
-    if not isinstance(Wheel, wheel):
-        raise TypeError("Error in contact forces calculation: wheel not given")
-
-    if not isinstance(Rail, rail):
-        raise TypeError("Error in contact forces calculation: rail not given")
-
-    if not isinstance(material_model, material):
-        raise TypeError("Error in contact forces calculation: no material provided")
-
-    if not isinstance(discretization, int):
-        raise TypeError(
-            "Error in contact forces calculation: discretization is not an integer"
+        # TODO: the following code must be substituted with a more object oriented approach or at least as function
+        # Chatty suggest to use an object oriented approach but I'm not sure it's the best way to go.
+        ContactRotationAngle = -(
+            np.arctan(
+                (
+                    Rail.rail_profile_pos[contact_indexes[-1], 1]
+                    - Rail.rail_profile_pos[contact_indexes[0], 1]
+                )
+                / (
+                    Rail.rail_profile_pos[contact_indexes[-1], 0]
+                    - Rail.rail_profile_pos[contact_indexes[0], 0]
+                )
+            )
         )
 
-    # TODO: the following code must be substituted with a more object oriented approach or at least as function
-    # Chatty suggest to use an object oriented approach but I'm not sure it's the best way to go.
-    ContactRotationAngle = -(
-        np.arctan(
+        WheelCoor = np.vstack(
             (
-                Rail.rail_profile_pos[contact_indexes[-1], 1]
-                - Rail.rail_profile_pos[contact_indexes[0], 1]
-            )
-            / (
-                Rail.rail_profile_pos[contact_indexes[-1], 0]
-                - Rail.rail_profile_pos[contact_indexes[0], 0]
-            )
-        )
-    )
-
-    WheelCoor = np.vstack(
-        (
-            np.reshape(
-                Rail.rail_profile_pos[contact_indexes, 0], [1, len(contact_indexes)]
-            )
-            - Rail.rail_profile_pos[contact_indexes[0], 0],
-            np.reshape(wheel_interp[contact_indexes], [1, len(contact_indexes)])
-            - wheel_interp[contact_indexes[0]],
-            np.zeros([1, len(contact_indexes)]),
-        )
-    )
-    RadiusCoor = np.vstack(
-        (
-            np.reshape(
-                Rail.rail_profile_pos[contact_indexes, 0], [1, len(contact_indexes)]
-            )
-            - Rail.rail_profile_pos[contact_indexes[0], 0],
-            np.reshape(radius_interp[contact_indexes], [1, len(contact_indexes)])
-            - radius_interp[contact_indexes[0]],
-            np.zeros([1, len(contact_indexes)]),
-        )
-    )
-    RailCoor = np.vstack(
-        (
-            np.reshape(
-                Rail.rail_profile_pos[contact_indexes, 0], [1, len(contact_indexes)]
-            )
-            - Rail.rail_profile_pos[contact_indexes[0], 0],
-            np.reshape(
-                Rail.rail_profile_pos[contact_indexes, 1], [1, len(contact_indexes)]
-            )
-            - Rail.rail_profile_pos[contact_indexes[0], 1],
-            np.zeros([1, len(contact_indexes)]),
-        )
-    )
-
-    # in future, the rotation matrix must be substituted with quaternion for a better
-    # representation and a more stable computation.
-    RotationMatrix = np.array(
-        [
-            [np.cos(ContactRotationAngle), -np.sin(ContactRotationAngle), 0],
-            [np.sin(ContactRotationAngle), np.cos(ContactRotationAngle), 0],
-            [0, 0, 1],
-        ]
-    )
-
-    WheelCoorLocal = RotationMatrix @ WheelCoor
-    RadiusCoorLocal = RotationMatrix @ RadiusCoor
-    RailCoorLocal = RotationMatrix @ RailCoor
-    # TODO: see above
-
-    LocalX = np.linspace(RailCoorLocal[0, 0], RailCoorLocal[0, -1], num=discretization)
-
-    WheelCoorLocalNormal = (
-        np.interp(LocalX, WheelCoorLocal[0, :], WheelCoorLocal[1, :])
-        + wheel_interp[contact_indexes[0]]
-    )
-    RadiusCoorLocalNormal = (
-        np.interp(LocalX, RadiusCoorLocal[0, :], RadiusCoorLocal[1, :])
-        + radius_interp[contact_indexes[0]]
-    )
-    RailCoorLocalNormal = (
-        np.interp(LocalX, RailCoorLocal[0, :], RailCoorLocal[1, :])
-        + Rail.rail_profile_pos[contact_indexes[0], 1]
-    )
-
-    Rlocal = RadiusCoorLocalNormal[int(discretization / 2)] / np.cos(
-        ContactRotationAngle
-    )
-
-    if isinstance(contact_model, eqv_el_normal_contact):
-        centroid = calculate_contact_eqv(
-            contact_model,
-            LocalX,
-            WheelCoorLocalNormal,
-            RailCoorLocalNormal,
-            Rlocal,
-            material_model,
-        )
-    elif isinstance(contact_model, kik_pyo_normal_contact):
-        centroid = calculate_contact_kik_pyo(
-            contact_model,
-            LocalX,
-            WheelCoorLocalNormal,
-            RailCoorLocalNormal,
-            Rlocal,
-            material_model,
-            discretization,
-        )
-    else:
-        raise TypeError(
-            "Error in contact forces calculation: no contact model provided"
-        )
-
-    centroidWheelNormal = np.array(
-        [
-            [centroid],
-            [
-                np.interp(
-                    centroid,
-                    LocalX,
-                    WheelCoorLocalNormal - wheel_interp[contact_indexes[0]],
+                np.reshape(
+                    Rail.rail_profile_pos[contact_indexes, 0], [1, len(contact_indexes)]
                 )
-            ],
-            [0],
-        ]
-    )
-    centroidRailNormal = np.array(
-        [
-            [centroid],
-            [
-                np.interp(
-                    centroid,
-                    LocalX,
-                    RailCoorLocalNormal - Rail.rail_profile_pos[contact_indexes[0], 1],
+                - Rail.rail_profile_pos[contact_indexes[0], 0],
+                np.reshape(wheel_interp[contact_indexes], [1, len(contact_indexes)])
+                - wheel_interp[contact_indexes[0]],
+                np.zeros([1, len(contact_indexes)]),
+            )
+        )
+        RadiusCoor = np.vstack(
+            (
+                np.reshape(
+                    Rail.rail_profile_pos[contact_indexes, 0], [1, len(contact_indexes)]
                 )
-            ],
-            [0],
-        ]
-    )
+                - Rail.rail_profile_pos[contact_indexes[0], 0],
+                np.reshape(radius_interp[contact_indexes], [1, len(contact_indexes)])
+                - radius_interp[contact_indexes[0]],
+                np.zeros([1, len(contact_indexes)]),
+            )
+        )
+        RailCoor = np.vstack(
+            (
+                np.reshape(
+                    Rail.rail_profile_pos[contact_indexes, 0], [1, len(contact_indexes)]
+                )
+                - Rail.rail_profile_pos[contact_indexes[0], 0],
+                np.reshape(
+                    Rail.rail_profile_pos[contact_indexes, 1], [1, len(contact_indexes)]
+                )
+                - Rail.rail_profile_pos[contact_indexes[0], 1],
+                np.zeros([1, len(contact_indexes)]),
+            )
+        )
 
-    centroidWheel_1 = RotationMatrix.T @ centroidWheelNormal
-    centroidRail_1 = RotationMatrix.T @ centroidRailNormal
-    contact_model.centroid_wheel = (
-        centroidWheel_1[0] + Rail.rail_profile_pos[contact_indexes[0], 0]
-    )
-    contact_model.centroid_rail = (
-        centroidRail_1[0] + Rail.rail_profile_pos[contact_indexes[0], 0]
-    )
+        # in future, the rotation matrix must be substituted with quaternion for a better
+        # representation and a more stable computation.
+        RotationMatrix = np.array(
+            [
+                [np.cos(ContactRotationAngle), -np.sin(ContactRotationAngle), 0],
+                [np.sin(ContactRotationAngle), np.cos(ContactRotationAngle), 0],
+                [0, 0, 1],
+            ]
+        )
 
-    centroidRadius = np.interp(
-        contact_model.centroid_wheel,
-        Rail.rail_profile_pos[contact_indexes, 0],
-        radius_interp[contact_indexes],
-    )
+        WheelCoorLocal = RotationMatrix @ WheelCoor
+        RadiusCoorLocal = RotationMatrix @ RadiusCoor
+        RailCoorLocal = RotationMatrix @ RailCoor
+        # TODO: see above
 
-    WheelAngleCentroid = np.interp(
-        # centroidWheel, Wheel[:, 0] + SearchPath.DyWheeslet, Wheel.wheel_angle # Wheel[:, 0] + SearchPath.DyWheeslet must be done outside in an object oriented way
-        contact_model.centroid_rail,
-        Wheel.wheel_profile_pos[:, 0],
-        Wheel.wheel_angle,
-    )
-    # missing the equivalent WheelAngleCentroid
-    contact_model.Q_force = contact_model.normal_force * np.cos(ContactRotationAngle)
-    contact_model.Y_force = contact_model.normal_force * np.sin(ContactRotationAngle)
-    contact_model.contact_angle = ContactRotationAngle
+        LocalX = np.linspace(RailCoorLocal[0, 0], RailCoorLocal[0, -1], num=discretization)
 
+        WheelCoorLocalNormal = (
+            np.interp(LocalX, WheelCoorLocal[0, :], WheelCoorLocal[1, :])
+            + wheel_interp[contact_indexes[0]]
+        )
+        RadiusCoorLocalNormal = (
+            np.interp(LocalX, RadiusCoorLocal[0, :], RadiusCoorLocal[1, :])
+            + radius_interp[contact_indexes[0]]
+        )
+        RailCoorLocalNormal = (
+            np.interp(LocalX, RailCoorLocal[0, :], RailCoorLocal[1, :])
+            + Rail.rail_profile_pos[contact_indexes[0], 1]
+        )
 
-def patch_search(Wheel, Rail, material_model, contact_patches, discretization=58):
+        if isinstance(self.contact_model, eqv_el_normal_contact):
+            # assign radius for eq contact model
+            Rlocal = RadiusCoorLocalNormal[int(discretization / 2)] / np.cos(
+                ContactRotationAngle
+            )
+            # assign shape of the contact patch for the equivalent contact model
+            Shape = WheelCoorLocalNormal - RailCoorLocalNormal
+            # assign contact model for the local contact patch
+            contact_model = self.contact_patches[counter]
+            # calculate centroid
+            centroid = contact_model.calculate_contact(
+                LocalX,
+                Shape,
+                Rlocal,
+                material_model,
+            )
+            contact_model.apply_centroid(
+                centroid,
+                LocalX,
+                contact_indexes,
+                Wheel,
+                wheel_interp,
+                Rail,
+                radius_interp,
+                WheelCoorLocalNormal,
+                RailCoorLocalNormal,
+                RotationMatrix,
+                ContactRotationAngle,
+            )
 
-    if not isinstance(Wheel, wheel):
-        raise TypeError("Error in contact forces calculation: wheel not given")
+        elif isinstance(self.contact_model, kik_pio_normal_contact):
 
-    if not isinstance(Rail, rail):
-        raise TypeError("Error in contact forces calculation: rail not given")
+            Rlocal = RadiusCoorLocalNormal / np.cos(
+                ContactRotationAngle
+            )
 
-    if not isinstance(material_model, material):
-        raise TypeError("Error in contact forces calculation: no material provided")
+            max_shape = np.max(WheelCoorLocalNormal - RailCoorLocalNormal)
+            approach_0 = 0.55 * max_shape
+            approach_1 = 0.45 * max_shape
 
-    WheelInt = np.interp(
-        Rail.rail_profile_pos[:, 0],
-        Wheel.wheel_profile_pos[:, 0],
-        Wheel.wheel_profile_pos[:, 1],
-    )
-    radius = np.interp(
-        Rail.rail_profile_pos[:, 0],
-        Wheel.wheel_radius[:, 0],
-        Wheel.wheel_radius[:, 1],
-    )
+            # Adjusting Shape for the Kik-Piotrowski method
+            WheelCoorLocalNormal_kik_pyo = WheelCoorLocalNormal - approach_1
+            Shape = WheelCoorLocalNormal_kik_pyo - RailCoorLocalNormal
 
-    ContactPos = np.where((WheelInt - Rail.rail_profile_pos[:, 1]) > 0)[0]
+            # find indexes for new shape greter then 0
+            Contact_kik_pio = np.where((Shape) > 0)[0]
 
-    if len(ContactPos) > 2:
+            # split indexes to create multiple patches
+            indices = np.where(np.diff(Contact_kik_pio) > 1)[0] + 1
+            Contact_kik_pio_Ns = np.split(Contact_kik_pio, indices)
 
-        indices = np.where(np.diff(ContactPos) > 1)[0] + 1
-        ContactPosNs = np.split(ContactPos, indices)
-        ContactPosNs_sorted = sorted(ContactPosNs, key=len, reverse=True)
+            # cicle over the splitted shapes
+            for counter_kik_pio in range(len(Contact_kik_pio_Ns)):
+                # define the contact model for the patch (double for kik)
+                contact_model = self.contact_patches[counter+(self.n_patches//3)*counter_kik_pio]
 
-        for counter in range(len(contact_patches)):
-            if counter < len(ContactPosNs_sorted):
-                contact_forces(
-                    ContactPosNs_sorted[counter],
-                    Wheel,
-                    WheelInt,
-                    Rail,
-                    radius,
-                    discretization,
-                    contact_patches[counter],
+                LocalX_kik_pio = LocalX[Contact_kik_pio_Ns[counter_kik_pio]]
+                Shape_kik_pio = Shape[Contact_kik_pio_Ns[counter_kik_pio]]
+                approach_kik_pio = np.max(Shape_kik_pio)
+                Rlocal_kik_pio = Rlocal[Contact_kik_pio_Ns[counter_kik_pio]]
+
+                centroid = contact_model.calculate_contact(
+                    LocalX_kik_pio,
+                    Shape_kik_pio,
+                    Rlocal_kik_pio[len(Rlocal_kik_pio)//2],
+                    approach_kik_pio,
                     material_model,
+                    discretization,
                 )
-            else:
-                contact_patches[counter].reset_to_zero()
 
-    else:
-        for counter in range(len(contact_patches)):
-            contact_patches[counter].reset_to_zero()
+                contact_model.apply_centroid(
+                    centroid,
+                    LocalX_kik_pio,
+                    contact_indexes,
+                    Wheel,
+                    wheel_interp,
+                    Rail,
+                    radius_interp,
+                    WheelCoorLocalNormal[Contact_kik_pio_Ns[counter_kik_pio]],
+                    RailCoorLocalNormal[Contact_kik_pio_Ns[counter_kik_pio]],
+                    RotationMatrix, # this should be adjusted when a second contact occours
+                    ContactRotationAngle, # this should be adjusted when a second contact occours
+                )

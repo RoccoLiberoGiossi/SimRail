@@ -1,12 +1,12 @@
 import numpy as np
 from lib.contact_settings import *
 from lib.dynLib.contact_dyn_state import dynamic_state
-from lib.normLib.contact_solver import patch_search
+from lib.normLib.contact_solver import NormalContactSolver
 from tqdm import tqdm
 
 from lib.geoLib.contact_wheel_rail import wheel, rail
 from lib.contact_material import material
-from lib.normLib.contact_methods import eqv_el_normal_contact, kik_pyo_normal_contact
+from lib.normLib.contact_methods import eqv_el_normal_contact, kik_pio_normal_contact
 
 
 # TODO move this from here. It should be in a more globally accessible place
@@ -17,32 +17,34 @@ def calc_global_force(contact_patches):
 def iterative_Q_search(
     Dz0,
     wheel_state,
-    Wheel,
-    Rail,
-    material_model,
-    contact_patches,
+    Wheel: wheel,
+    Rail: rail,
+    contact_model: NormalContactSolver,
+    material_model: material,
     discretization=58,
     Q_solve=50000,
 ):
     wheel_state.state_z = Dz0
     Wheel.set_dynamic_state(wheel_state)
     Wheel.calculate_position()
-    patch_search(Wheel, Rail, material_model, contact_patches, discretization)
+    contact_model.patch_search(Wheel, Rail, material_model, discretization)
 
-    total_force = calc_global_force(contact_patches)
+    total_force = calc_global_force(contact_model.contact_patches)
 
     return np.abs(total_force - Q_solve)
 
 
 def static_contact(
-    deltays,
-    Wheel,
-    Rail,
-    contact_patches,
-    material_model,
-    discretization=58,
-    Q_solve=50000,
-    tollerance=50,
+    deltays: np.ndarray[float],
+    Wheel: wheel,
+    Rail: rail,
+    contact_model: NormalContactSolver,
+    material_model: material,
+    discretization: int = 58,
+    Q_solve: float = 50000,
+    tollerance: float = 50,
+    max_iter: int = 100,
+    method: str = "hybr",
 ):
     if not isinstance(Wheel, wheel):
         raise TypeError("Error in contact forces calculation: wheel not given")
@@ -56,11 +58,11 @@ def static_contact(
     result_state = {}
     result_state_pressure = {}
 
-    if isinstance(contact_patches[0], eqv_el_normal_contact):
-        for jj in range(len(contact_patches)):
+    if isinstance(contact_model.contact_patches[0], eqv_el_normal_contact):
+        for jj in range(len(contact_model.contact_patches)):
             result_state[f"patch_{jj}"] = np.zeros((len(deltays), 8), dtype=np.float64)
-    elif isinstance(contact_patches[0], kik_pyo_normal_contact):
-        for jj in range(len(contact_patches)):
+    elif isinstance(contact_model.contact_patches[0], kik_pio_normal_contact):
+        for jj in range(len(contact_model.contact_patches)):
             result_state[f"patch_{jj}"] = np.zeros((len(deltays), 7), dtype=np.float64)
             result_state_pressure[f"patch_{jj}"] = np.zeros(
                 (len(deltays) * discretization, discretization + 2), dtype=np.float64
@@ -83,75 +85,85 @@ def static_contact(
         else:
             Dz0 = dz0_prew
 
-        root = fsolve(
+        solution = root(
             iterative_Q_search,
             Dz0,
-            args=(new_state, Wheel, Rail, material_model, contact_patches),
+            args=(new_state, Wheel, Rail, contact_model, material_model, discretization, Q_solve),
+            method=method,
         )
-        Qout = calc_global_force(contact_patches)
-        Dz0 = root
+        # print(solution)
+        # solution = fsolve(
+        #     iterative_Q_search,
+        #     Dz0,
+        #     args=(new_state, Wheel, Rail, contact_model, material_model, discretization, Q_solve),
+        # )
+        Qout = calc_global_force(contact_model.contact_patches)
+        Dz0 = solution.x
 
         iteration = 1
 
-        while (np.abs(Qout - Q_solve) > tollerance) and (iteration < 100):
+        while (np.abs(Qout - Q_solve) > tollerance) and (iteration < max_iter):
             if (Qout - Q_solve) > 0:
-                root = fsolve(
+                solution = root(
                     iterative_Q_search,
                     Dz0 * (1 + (100 - iteration) / 10000),
-                    args=(new_state, Wheel, Rail, material_model, contact_patches),
+                    args=(new_state, Wheel, Rail, contact_model, material_model, discretization, Q_solve),
+                    method=method,
                 )
             else:
-                root = fsolve(
+                solution = root(
                     iterative_Q_search,
                     Dz0 * (1 - (100 - iteration) / 10000),
-                    args=(new_state, Wheel, Rail, material_model, contact_patches),
+                    args=(new_state, Wheel, Rail, contact_model, material_model, discretization, Q_solve),
+                    method=method,
                 )
-            Qout = calc_global_force(contact_patches)
+            Qout = calc_global_force(contact_model.contact_patches)
             iteration = iteration + 1
 
         iterative_Q_search(
-            root,
+            solution.x,
             new_state,
             Wheel,
             Rail,
+            contact_model,
             material_model,
-            contact_patches,
             discretization,
             Q_solve,
         )
 
-        dz0_prew = root
+        dz0_prew = solution.x
 
         # if isinstance(contact_model, eqv_el_normal_contact):
 
-        for jj in range(len(contact_patches)):
-            if isinstance(contact_patches[jj], eqv_el_normal_contact):
+        for jj in range(len(contact_model.contact_patches)):
+            if isinstance(contact_model.contact_patches[jj], eqv_el_normal_contact):
                 result_state[f"patch_{jj}"][deltyIndx] = [
-                    float(root),
-                    float(contact_patches[jj].normal_force),
-                    float(contact_patches[jj].Q_force),
-                    float(contact_patches[jj].Y_force),
-                    float(contact_patches[jj].approach),
-                    float(contact_patches[jj].centroid_wheel),
-                    float(contact_patches[jj].semi_axis_a),
-                    float(contact_patches[jj].semi_axis_b),
+                    float(solution.x),
+                    float(contact_model.contact_patches[jj].normal_force),
+                    float(contact_model.contact_patches[jj].Q_force),
+                    float(contact_model.contact_patches[jj].Y_force),
+                    float(contact_model.contact_patches[jj].approach),
+                    float(contact_model.contact_patches[jj].centroid_wheel),
+                    float(contact_model.contact_patches[jj].semi_axis_a),
+                    float(contact_model.contact_patches[jj].semi_axis_b),
                 ]
-            elif isinstance(contact_patches[jj], kik_pyo_normal_contact):
+            elif isinstance(contact_model.contact_patches[jj], kik_pio_normal_contact):
                 result_state[f"patch_{jj}"][deltyIndx] = [
-                    float(root),
-                    float(contact_patches[jj].normal_force),
-                    float(contact_patches[jj].Q_force),
-                    float(contact_patches[jj].Y_force),
-                    float(contact_patches[jj].approach),
-                    float(contact_patches[jj].centroid_wheel),
-                    float(contact_patches[jj].pressure_0),
+                    float(solution.x),
+                    float(contact_model.contact_patches[jj].normal_force),
+                    float(contact_model.contact_patches[jj].Q_force),
+                    float(contact_model.contact_patches[jj].Y_force),
+                    float(contact_model.contact_patches[jj].approach),
+                    float(contact_model.contact_patches[jj].centroid_wheel),
+                    float(contact_model.contact_patches[jj].pressure_0),
                 ]
-                if contact_patches[jj].normal_force > 0:
+                # TODO: for god sake fix this part!
+                if contact_model.contact_patches[jj].normal_force > 0:
                     data_to_stack = np.hstack(
                         [
-                            contact_patches[jj].x_patch[:, np.newaxis],
-                            contact_patches[jj].y_patch[:, np.newaxis],
-                            contact_patches[jj].pressure_patch,
+                            contact_model.contact_patches[jj].x_patch[:, np.newaxis],
+                            contact_model.contact_patches[jj].y_patch[:, np.newaxis],
+                            contact_model.contact_patches[jj].pressure_patch,
                         ]
                     )
                     result_state_pressure[f"patch_{jj}"][
@@ -159,7 +171,7 @@ def static_contact(
                         0 : discretization + 2,
                     ] = data_to_stack
 
-    for jj in range(len(contact_patches)):
+    for jj in range(len(contact_model.contact_patches)):
         result_state[f"patch_{jj}"] = np.array(result_state[f"patch_{jj}"])
 
     return result_state, result_state_pressure

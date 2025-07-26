@@ -1,8 +1,9 @@
 import os
 import numpy as np
 from pathlib import Path
+from typing import Union
 
-from scipy.optimize import fsolve
+from scipy.optimize import root
 from scipy.integrate import simpson
 from scipy import interpolate
 from scipy.interpolate import PchipInterpolator
@@ -22,8 +23,8 @@ EQU_EL_DIV_CORRECTION = 1.397839912270349316e00
 # --------------------------------------------------------- #
 # GLobal files definition                                   #
 # --------------------------------------------------------- #
-root = Path.cwd()
-profiles_path = root.joinpath("Profiles")
+root_pwd = Path.cwd()
+profiles_path = root_pwd.joinpath("Profiles")
 wheel_path = profiles_path.joinpath("Wheel_Profiles" + os.sep + "S1002.txt")
 rail_path = profiles_path.joinpath("Rail_Profiles" + os.sep + "UIC60.txt")
 S1002_profile = np.loadtxt(wheel_path, delimiter=",")
