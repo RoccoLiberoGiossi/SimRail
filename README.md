@@ -64,4 +64,8 @@ See first `example_use.ipynb` for a complete example, including plotting and res
 
 ## License
 
-For research and educational use.
+For research and educational use, see the LICENSE file.
+
+## A small explanation
+
+A small explanation is given in the file `a_paper_explanation.pdf` for the solution of the equivalent contact method. Here, the results of SimRail are also compaared with the ones obtained with the commertial software SIMPACK.
