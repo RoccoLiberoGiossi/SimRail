@@ -155,6 +155,8 @@ class eqv_el_normal_contact(normal_contact):
             ]
         )
 
+        # TODO: need to add the vertical location of the centraid.
+        # At the moment it is a float number but should be a coordinate vector
         centroidWheel_1 = RotationMatrix.T @ centroidWheelNormal
         centroidRail_1 = RotationMatrix.T @ centroidRailNormal
         self.centroid_wheel = (
@@ -164,6 +166,7 @@ class eqv_el_normal_contact(normal_contact):
             centroidRail_1[0] + Rail.rail_profile_pos[contact_indexes[0], 0]
         )
 
+        # TODO:
         # centroidRadius = np.interp(
         #     self.centroid_wheel,
         #     Rail.rail_profile_pos[contact_indexes, 0],
@@ -176,7 +179,8 @@ class eqv_el_normal_contact(normal_contact):
         #     Wheel.wheel_profile_pos[:, 0],
         #     Wheel.wheel_angle,
         # )
-        # missing the equivalent WheelAngleCentroid
+        # missing the equivalent WheelAngleCentroid in this version
+
         self.Q_force = self.normal_force * np.cos(ContactRotationAngle)
         self.Y_force = self.normal_force * np.sin(ContactRotationAngle)
         self.contact_angle = ContactRotationAngle

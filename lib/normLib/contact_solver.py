@@ -104,8 +104,6 @@ class NormalContactSolver:
         radius_interp = wheel radius segment interpolated over the rail
         discretization = patch discretization as imposed by engineer"""
 
-        # TODO: the following code must be substituted with a more object oriented approach or at least as function
-        # Chatty suggest to use an object oriented approach but I'm not sure it's the best way to go.
         ContactRotationAngle = -(
             np.arctan(
                 (
@@ -155,7 +153,7 @@ class NormalContactSolver:
             )
         )
 
-        # in future, the rotation matrix must be substituted with quaternion for a better
+        # TODO: in future, the rotation matrix must be substituted with quaternion for a better
         # representation and a more stable computation.
         RotationMatrix = np.array(
             [
@@ -168,7 +166,6 @@ class NormalContactSolver:
         WheelCoorLocal = RotationMatrix @ WheelCoor
         RadiusCoorLocal = RotationMatrix @ RadiusCoor
         RailCoorLocal = RotationMatrix @ RailCoor
-        # TODO: see above
 
         LocalX = np.linspace(RailCoorLocal[0, 0], RailCoorLocal[0, -1], num=discretization)
 

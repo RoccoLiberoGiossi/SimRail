@@ -60,7 +60,7 @@ SimRail provides modular tools for modeling and analyzing wheel-rail contact, in
 
 ## Example
 
-See first `example_use.ipynb` for a complete example, including plotting and result analysis. A simple implementation of FASTSIM is done for teh equivalent contact in  `fastsim_example.ipynb`.
+See first `example_use.ipynb` for a complete example, including plotting and result analysis. A simple implementation of FASTSIM is done for the equivalent contact in  `fastsim_example.ipynb`.
 
 ## License
 
