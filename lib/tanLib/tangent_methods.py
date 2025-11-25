@@ -1,6 +1,6 @@
 from lib.contact_settings import *
 from lib.normLib.contact_methods import eqv_el_normal_contact, kik_pio_normal_contact
-from lib.contact_material import material
+from lib.contact_material import material, kalker_coefficients
 from lib.dynLib.contact_dyn_state import dynamic_state
 
 class tangent_creepage:
@@ -23,15 +23,11 @@ class fastsim:
         self.s_out = np.zeros((self.discratization, self.discratization))
         self.g_bound = np.zeros((self.discratization, self.discratization))
 
-        self.pchip_interp_c_11 = PchipInterpolator(abratio, c11tab)
-        self.pchip_interp_c_22 = PchipInterpolator(abratio, c22tab)
-        self.pchip_interp_c_23 = PchipInterpolator(abratio, c23tab)
-
     def reset_to_zero(self):
         for attribute in vars(self):
             setattr(self, attribute, 0)
 
-    def calc_tangent_force(self, contact_patch, material_properties, slip_state, state_dyn):
+    def calc_tangent_force(self, contact_patch, material_properties, kalker_tables, slip_state, state_dyn):
         
         if isinstance(contact_patch, eqv_el_normal_contact):
 
@@ -47,14 +43,18 @@ class fastsim:
                 raise TypeError(
                     "Error in FASTSIM calculation: not a correct dynamic state method"
                 )
+            if not isinstance(kalker_tables, kalker_coefficients):
+                raise TypeError(
+                    "Error in FASTSIM calculation: not a correct dynamic state method"
+                )
 
             a = contact_patch.semi_axis_a
             b = contact_patch.semi_axis_b
 
             # Interpolating values
-            c_11 = self.pchip_interp_c_11(a / b)
-            c_22 = self.pchip_interp_c_22(a / b)
-            c_23 = self.pchip_interp_c_23(a / b)
+            c_11 = kalker_tables.pchip_interp_c_11(a / b)
+            c_22 = kalker_tables.pchip_interp_c_22(a / b)
+            c_23 = kalker_tables.pchip_interp_c_23(a / b)
 
             # Calculating L_x, L_y, and L_phi
             L_x = 8 * a / (3 * material_properties.G * c_11)
