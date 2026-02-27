@@ -9,6 +9,7 @@ class tangent_creepage:
         self.nu_y = nu_y
         self.phi = phi
 
+#TODO: check spelling of discratization
 class fastsim:
     def __init__(self, discratization=58):
         self.discratization = discratization

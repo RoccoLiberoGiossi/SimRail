@@ -101,6 +101,7 @@ class wheel:
         temp_profile = self.calculate_yaw(self.wheel_start_pos)
         temp_profile[:, 0] = temp_profile[:, 0] + self.dynamic_state.state_y
         temp_profile[:, 1] = temp_profile[:, 1] + self.dynamic_state.state_z
+        temp_profile = self.calculate_roll(temp_profile)
 
         self.wheel_profile_pos = temp_profile
         self.wheel_angle = self.calc_wheel_angle()
@@ -108,6 +109,7 @@ class wheel:
         temp_profile = self.calculate_yaw(self.wheel_start_radius)
         temp_profile[:, 0] = temp_profile[:, 0] + self.dynamic_state.state_y
         temp_profile[:, 1] = temp_profile[:, 1] + self.r0
+        temp_profile = self.calculate_roll(temp_profile)
 
         self.wheel_radius = temp_profile
     
@@ -134,9 +136,20 @@ class wheel:
 
         return pos_yawed
     
-    def calculate_roll():
-        # TODO add function to do roll rotation calculation
-        pass
+    def calculate_roll(self, profile_to_convert):
+        
+        rotation_Z = np.array(
+            [
+                [np.cos(self.dynamic_state.state_roll), -np.sin(self.dynamic_state.state_roll), 0],
+                [np.sin(self.dynamic_state.state_roll), np.cos(self.dynamic_state.state_roll), 0],
+                [0, 0, 1],
+            ]
+        )
+
+        coords = np.hstack([profile_to_convert, np.zeros((len(profile_to_convert), 1))])
+        pos_rolled = coords @ rotation_Z.T
+
+        return pos_rolled[:, :2]
 
 
 class rail:
@@ -162,15 +175,10 @@ class rail:
             ]
         )
 
-        rail_rotated = np.zeros([len(self.rail_profile), 2])
+        coords = np.hstack([self.rail_profile, np.zeros((len(self.rail_profile), 1))])
+        rail_rotated = coords @ rotation_Z.T
 
-        for jj in range(0, len(self.rail_profile)):
-            Coord = np.array([self.rail_profile[jj, 0], self.rail_profile[jj, 1], 0])
-            RailTiltLocal = np.matmul(rotation_Z, np.transpose(Coord))
-            rail_rotated[jj, 0] = RailTiltLocal[0]
-            rail_rotated[jj, 1] = RailTiltLocal[1]
-
-        return rail_rotated
+        return rail_rotated[:, :2]
 
     def set_start_post(self):
         rail_start_pos = np.zeros([len(self.rail_rotated), 2])
@@ -192,3 +200,11 @@ class rail:
             print("Please add if it is the left or right rail")
 
         return rail_start_pos
+    
+    # TODO: fix this part
+    def calculate_position(self, y, z):
+        temp_profile = self.rail_start_pos
+        temp_profile[:, 0] = temp_profile[:, 0] + y
+        temp_profile[:, 1] = temp_profile[:, 1] + z
+
+        self.rail_profile_pos = temp_profile

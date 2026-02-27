@@ -40,6 +40,7 @@ class eqv_el_normal_contact(normal_contact):
         B_Hertz=0,
         teta_Hertz=0,
         ratio_Hertz=0,
+        Rlocal=0,
     ):
         super().__init__()
         self.semi_axis_a = semi_axis_a
@@ -48,6 +49,7 @@ class eqv_el_normal_contact(normal_contact):
         self.B_Hertz = B_Hertz
         self.teta_Hertz = teta_Hertz
         self.ratio_Hertz = ratio_Hertz
+        self.Rlocal = Rlocal
 
     def reset_to_zero(self):
         for attribute in vars(self):
@@ -111,6 +113,8 @@ class eqv_el_normal_contact(normal_contact):
                 * (self.approach / self.ratio_Hertz) ** 3
             )[0]
         )
+
+        self.Rlocal = Rlocal
 
         return centroid
     
@@ -197,6 +201,7 @@ class kik_pio_normal_contact(normal_contact):
         x_patch = [],
         y_patch = [],
         pressure_patch = [],
+        Rlocal = 0,
     ):
         super().__init__()
         self.pressure_0 = pressure_0
@@ -205,6 +210,7 @@ class kik_pio_normal_contact(normal_contact):
         self.x_patch = x_patch
         self.y_patch = y_patch
         self.pressure_patch = pressure_patch
+        self.Rlocal = Rlocal
 
     def reset_to_zero(self):
         for attribute in vars(self):
@@ -276,6 +282,8 @@ class kik_pio_normal_contact(normal_contact):
         self.y_patch = y_integration
         self.pressure_patch = self.pressure_0 / xl_0 * search_matrix_1
 
+        self.Rlocal = Rlocal
+        
         return centroid
     
     def apply_centroid(
