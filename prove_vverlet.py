@@ -11,6 +11,7 @@ from calc_routines.determine_static_contact import static_contact
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 import time
+from tqdm import tqdm
 
 
 def Rx(angle):
@@ -57,15 +58,15 @@ def contact_local_to_global(F_x, F_y, Q_force, Y_force, yaw, roll, contact_angle
 
     # print(R_wheel @ F_local)
 
-    # return F_local
-    return R_wheel @ F_local
+    return F_local
+    # return R_wheel @ F_local
 
 
 def dynamics(
     t,
     x,
-    wheels: wheel,
-    rails: rail,
+    wheels: list[wheel],
+    rails: list[rail],
     contact_eq_s: list[NormalContactSolver],
     material_model,
     tangent_method,
@@ -105,50 +106,93 @@ def dynamics(
     Y_forces = []
     Q_forces = []
 
+    y_rail = rail_y(q[0])
+
+    force_vector_series = []
+    slip_series = []
+    creep_series = []
+
     for index, wheel in enumerate(wheels):
 
         wheel.set_dynamic_state(new_state)
         wheel.calculate_position()
 
-        y_rail = rail_y(t)
         rails[index].calculate_position(y_rail, 0)
 
-        contact_eq_s[index].patch_search(wheel, rails[index], material_model, discretization=30)
-        # radius_inerpolator = PchipInterpolator(
-        #     wheel.wheel_radius[:, 0], wheel.wheel_radius[:, 1]
-        # )
+        contact_eq_s[index].patch_search(wheel, rails[index], material_model, discretization=10)
 
-        Fx_forces = []
-        Fy_forces = []
-        moments_pitch = []
-        moments_yaw = []
-        moments_roll = []
-        creep_xs = []
-        creep_ys = []
-        phi_s = []
-        delta_rs = []
-        centroids = []
-
-        for index, contacts in enumerate(contact_eq_s[index].contact_patches):
+        for _, contacts in enumerate(contact_eq_s[index].contact_patches):
             contact_radius = contacts.Rlocal
             delta_r = wheel.r0 - contact_radius
             if type(contacts.centroid_wheel) != int:
-                print("in here")
-                if wheel.lr == RIGHT:
-                    nu_x = -(
-                        delta_r / wheel.r0
-                        + np.abs(contacts.centroid_wheel.item()) / 2 * v[4] / v[0]
-                    )
-                elif wheel.lr == LEFT:
-                    nu_x = -(
-                        delta_r / wheel.r0
-                        - np.abs(contacts.centroid_wheel.item()) / 2 * v[4] / v[0]
-                    )
+                
+                centroid = contacts.centroid_wheel.item()
+                
+                tan_gamma = np.tan(contacts.contact_angle)
+                cos_gamma = np.cos(contacts.contact_angle)
+                sin_gamma = np.sin(contacts.contact_angle)
+                cos_yaw = np.cos(q[4])
+                sin_yaw = np.sin(q[4])
+                # v_inv = 1 / v[0] if v[0] != 0 else 0
+                v_forward = v[0] if np.abs(v[0]) > 1e-6 else 1e-6 # Avoid hard zero
+                v_inv = 1.0 / v_forward
 
-                nu_y = 1 / np.cos(contacts.contact_angle) * (v[1] / v[0] - q[4])
-                phi = -np.cos(contacts.contact_angle) / wheel.r0 + v[4] / v[0] * np.cos(
-                    contacts.contact_angle
-                )
+                if wheel.lr == RIGHT:
+
+                    long_disp = contact_radius*tan_gamma*q[4]
+                    v_x = v[0] - np.abs(centroid)*v[4] + contact_radius*v[3]
+                    v_y = v[1] + contact_radius*v[3]*q[4] - contact_radius*v[5]
+                    v_z = v[2] + np.abs(centroid)*v[5] - long_disp*v[3]
+
+                    nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
+                    nu_y = v_inv * (v_y * cos_gamma - v_z * sin_gamma)
+                    phi = v_inv * (v[4] * cos_gamma + v[3] * sin_gamma)
+
+                    # nu_x = v_inv * (v[3]*contact_radius - v[0] - np.abs(centroid)*v[4] * cos_gamma)
+                    # nu_y = v_inv * v[1] * cos_gamma + q[4] * cos_gamma + v_inv*v[3]*contact_radius*sin_gamma
+                    # phi = - v_inv * (v[4] * sin_gamma + v[3] * sin_gamma) * cos_gamma
+
+                elif wheel.lr == LEFT:
+
+                    long_disp = -contact_radius*tan_gamma*q[4]
+                    v_x = v[0] + np.abs(centroid)*v[4] + contact_radius*v[3]
+                    v_y = v[1] + contact_radius*v[3]*q[4] + contact_radius*v[5]
+                    v_z = v[2] - np.abs(centroid)*v[5] - long_disp*v[3]
+
+                    nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
+                    nu_y = v_inv * (v_y * cos_gamma + v_z * sin_gamma)
+                    phi = v_inv * (v[4] * cos_gamma - v[3] * sin_gamma)
+
+                    # nu_x = v_inv * (v[3]*contact_radius + v[0] - np.abs(centroid)*v[4] * cos_gamma)
+                    # nu_y = v_inv * v[1] * cos_gamma + q[4] * cos_gamma - v_inv*v[3]*contact_radius*sin_gamma
+                    # phi = v_inv * (v[4] * sin_gamma + v[3] * sin_gamma) * cos_gamma
+                
+                # if wheel.lr == RIGHT:
+
+                #     long_disp = contact_radius*tan_gamma*q[4]
+                #     v_x = v[0] - np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
+                #     v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] - contact_radius*v[5]
+                #     v_z = v[2] + np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
+
+                #     nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
+                #     nu_y = v_inv * (v_y * cos_gamma - v_z * sin_gamma)
+                #     phi = v_inv * (v[4] * cos_gamma + (-v[0]/wheel.r0 + v[3]) * sin_gamma)
+
+                # elif wheel.lr == LEFT:
+
+                #     long_disp = -contact_radius*tan_gamma*q[4]
+                #     v_x = v[0] + np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
+                #     v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] + contact_radius*v[5]
+                #     v_z = v[2] - np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
+
+                #     nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
+                #     nu_y = v_inv * (v_y * cos_gamma + v_z * sin_gamma)
+                #     phi = v_inv * (v[4] * cos_gamma - (-v[0]/wheel.r0 + v[3]) * sin_gamma)
+
+                # print(f"nu_x: {nu_x}, nu_y: {nu_y}, phi: {phi}, cos_gamma: {cos_gamma}, sin_gamma: {sin_gamma}, cos_yaw: {cos_yaw}, sin_yaw: {sin_yaw}")
+                # print(f"v_x: {v_x}, v_y: {v_y}, v_z: {v_z}")
+                # print(f"v_inv: {v_inv}, v_forward: {v_forward}, cose1: {np.abs(centroid)*v[4]}, cose2: {contact_radius*(-v[0]/wheel.r0 + v[3])}")
+                # input()
 
                 creep = tangent_creepage(nu_x=nu_x, nu_y=nu_y, phi=phi)
 
@@ -156,15 +200,9 @@ def dynamics(
                     contacts, material_model, kalker_tables, creep, new_state
                 )
 
-                # force_vector = contact_local_to_global(
-                #     0,
-                #     tangent_method.F_y,
-                #     contacts.Q_force,
-                #     0,
-                #     0,
-                #     0,
-                #     0,
-                # )
+                # print(tangent_method.F_x, tangent_method.F_y, contacts.centroid_wheel.item(), wheel.lr)
+                # input()
+
                 force_vector = contact_local_to_global(
                     tangent_method.F_x,
                     tangent_method.F_y,
@@ -174,152 +212,116 @@ def dynamics(
                     q[5],
                     contacts.contact_angle,
                 )
-                # force_vector = contact_local_to_global(
-                #     0.0,
-                #     0.0,
-                #     contacts.Q_force,
-                #     contacts.Y_force,
-                #     q[4],
-                #     q[5],
-                #     contacts.contact_angle,
-                # )
 
-                Y_forces.append(contacts.Y_force)
-                Q_forces.append(contacts.Q_force)
-                Fx_forces.append(tangent_method.F_x)
-                Fy_forces.append(tangent_method.F_y)
-                moments_pitch.append(contact_radius * tangent_method.F_x)
-                moments_yaw.append(contacts.centroid_wheel.item() * tangent_method.F_x)
-                moments_roll.append(contacts.centroid_wheel.item() * contacts.Q_force)
-                creep_xs.append(nu_x)
-                creep_ys.append(nu_y)
-                phi_s.append(phi)
-                delta_rs.append(delta_r)
-                centroids.append(contacts.centroid_wheel.item())
-                print(contacts.Y_force)
+                force_vector_series.append(np.concatenate([force_vector, [contact_radius * force_vector[0], centroid * force_vector[0], centroid * force_vector[2]]]))
+                slip_series.append(np.array([nu_x, nu_y, phi]))
+                creep_series.append(np.array([tangent_method.F_x, tangent_method.F_y]))
+
+                # print(force_vector)
+                # input()
+
+                # Y_forces.append(contacts.Y_force)
+                # Q_forces.append(contacts.Q_force)
+                # # Fx_forces.append(tangent_method.F_x)
+                # # Fy_forces.append(tangent_method.F_y)
+                # # moments_pitch.append(contact_radius * tangent_method.F_x)
+                # # moments_yaw.append(contacts.centroid_wheel.item() * tangent_method.F_x)
+                # # moments_roll.append(contacts.centroid_wheel.item() * contacts.Q_force)
+                # creep_xs.append(nu_x)
+                # creep_ys.append(nu_y)
+                # phi_s.append(phi)
+                # delta_rs.append(delta_r)
+                # centroids.append(contacts.centroid_wheel.item())
+
+                F_vector[0] -= force_vector[0]
+                F_vector[1] += force_vector[1]
+                F_vector[2] += force_vector[2]
+                F_vector[3] += contact_radius * force_vector[0]
+                F_vector[4] -= centroid * force_vector[0]
+                F_vector[5] += centroid * force_vector[2]
+
             else:
-                force_vector = contact_local_to_global(
-                    0.0,
-                    0.0,
-                    contacts.Q_force,
-                    contacts.Y_force,
-                    q[4],
-                    q[5],
-                    contacts.contact_angle,
-                )
-                Y_forces.append(contacts.Y_force)
-                Q_forces.append(contacts.Q_force)
+                force_vector_series.append(np.zeros(6))
+                slip_series.append(np.zeros(3))
+                creep_series.append(np.zeros(2))
 
-            
-
-            # F_vector[0] += 0#contacts.Q_force
-            # F_vector[1] += contacts.Y_force
-            # F_vector[2] += contacts.Q_force
-            # F_vector[3] += 0#contact_radius.item() * force_vector[0]
-            # F_vector[4] += 0#contacts.centroid_wheel.item() * force_vector[0]
-            # F_vector[5] += 0#contacts.centroid_wheel.item() * force_vector[2]
-            F_vector[0] += force_vector[0]
-            F_vector[1] += force_vector[1]
-            F_vector[2] += force_vector[2]
-            F_vector[3] += contact_radius * force_vector[0]
-            F_vector[4] += contacts.centroid_wheel.item() * force_vector[0] if type(contacts.centroid_wheel) != int else 0
-            F_vector[5] += contacts.centroid_wheel.item() * force_vector[2] if type(contacts.centroid_wheel) != int else 0
-
-        # if wheel.lr == RIGHT:
-        #     print(f"Wheel Right Forces:")
-        # elif wheel.lr == LEFT:
-        #     print(f"Wheel Left Forces:")
-        # print(f"centroid: {centroids}")
-        # print(f"Y forces: {Y_forces}")
-        # print(f"Q forces: {Q_forces}")
-        # print(f"Fx forces: {Fx_forces}")
-        # print(f"Fy forces: {Fy_forces}")
-        # print(f"Moments pitch: {moments_pitch}")
-        # print(f"Moments yaw: {moments_yaw}")
-        # print(f"Moments roll: {moments_roll}")
-        # print(f"g force:{wheelset_mass[0] * 9.81}")
-        # print(f"Creep x: {creep_xs}")
-        # print(f"Creep y: {creep_ys}")
-        # print(f"Phi: {phi_s}")
-        # print(f"Delta r: {delta_rs}")
-
-    Y_forces_series.append(Y_forces)
-    Q_forces_series.append(Q_forces)
-    rail_position.append(y_rail)
-    Wheelset_y_position.append(new_state.state_y)
-    Wheelset_z_position.append(new_state.state_z)
+    # Y_forces_series.append(Y_forces)
+    # Q_forces_series.append(Q_forces)
+    # rail_position.append(y_rail)
+    # Wheelset_y_position.append(new_state.state_y)
+    # Wheelset_z_position.append(new_state.state_z)
 
     F_vector[2] -= wheelset_mass[0] * 9.81
-    print(f"Total Force Vector: {F_vector}")
+    # print(f"Total Force Vector: {F_vector}")
     dx[6:12] = -F_vector / wheelset_mass
 
-    print(f"doing...{t}")
+    # print(f"doing...{t}")
 
-    global _fig, _ax_1, _ax_2, _ax_3, _ax_4, _ax_5, _ax_6
+    # global _fig, _ax_1, _ax_2, _ax_3, _ax_4, _ax_5, _ax_6
 
-    # Create the figure only once
-    if _fig is None:
-        # _fig, _ax_1 = plt.subplots(1, 1, figsize=(10, 4))
-        _fig, axes = plt.subplots(2, 3, figsize=(10, 4))
-        _ax_1, _ax_2, _ax_3, _ax_4, _ax_5, _ax_6 = axes.flatten()
-        _ax_1.set_title(f"Wheel {t} s")
-        _ax_1.set_aspect("equal")
-        _ax_2.set_title("Y Forces")
-        _ax_3.set_title("Q Forces")
-        _ax_4.set_title("Rail Position")
-        _ax_5.set_title("Wheelset y Position")
-        _ax_6.set_title("Rail Position")
-        # _ax_2.set_aspect("equal")
-        plt.show()
+    # # Create the figure only once
+    # if _fig is None:
+    #     # _fig, _ax_1 = plt.subplots(1, 1, figsize=(10, 4))
+    #     _fig, axes = plt.subplots(2, 3, figsize=(10, 4))
+    #     _ax_1, _ax_2, _ax_3, _ax_4, _ax_5, _ax_6 = axes.flatten()
+    #     _ax_1.set_title(f"Wheel {t} s")
+    #     _ax_1.set_aspect("equal")
+    #     _ax_2.set_title("Y Forces")
+    #     _ax_3.set_title("Q Forces")
+    #     _ax_4.set_title("Rail Position")
+    #     _ax_5.set_title("Wheelset y Position")
+    #     _ax_6.set_title("Rail Position")
+    #     # _ax_2.set_aspect("equal")
+    #     plt.show()
 
-    # Clear the old plots
-    _ax_1.cla()
-    _ax_2.cla()
-    _ax_3.cla()
-    _ax_4.cla()
-    _ax_5.cla()
-    _ax_6.cla()
+    # # Clear the old plots
+    # _ax_1.cla()
+    # _ax_2.cla()
+    # _ax_3.cla()
+    # _ax_4.cla()
+    # _ax_5.cla()
+    # _ax_6.cla()
 
-    # Plot wheel geometry
-    _ax_1.plot(rails[1].rail_profile_pos[:, 0], rails[1].rail_profile_pos[:, 1], c="r")
-    _ax_1.plot(wheels[1].wheel_profile_pos[:, 0], wheels[1].wheel_profile_pos[:, 1], c="black")
-    _ax_1.plot(rails[0].rail_profile_pos[:, 0], rails[0].rail_profile_pos[:, 1], c="r")
-    _ax_1.plot(wheels[0].wheel_profile_pos[:, 0], wheels[0].wheel_profile_pos[:, 1], c="black")
-    _ax_1.set_title(f"Wheel {t} s")
-    _ax_1.set_aspect("equal")
+    # # Plot wheel geometry
+    # _ax_1.plot(rails[1].rail_profile_pos[:, 0], rails[1].rail_profile_pos[:, 1], c="r")
+    # _ax_1.plot(wheels[1].wheel_profile_pos[:, 0], wheels[1].wheel_profile_pos[:, 1], c="black")
+    # _ax_1.plot(rails[0].rail_profile_pos[:, 0], rails[0].rail_profile_pos[:, 1], c="r")
+    # _ax_1.plot(wheels[0].wheel_profile_pos[:, 0], wheels[0].wheel_profile_pos[:, 1], c="black")
+    # _ax_1.set_title(f"Wheel {t} s")
+    # _ax_1.set_aspect("equal")
 
-    # Plot rail geometry (select correct rail)
-    _ax_2.plot(Y_forces_series)
-    _ax_2.grid(True)
-    _ax_2.set_title("Y Forces")
-    # _ax_2.set_aspect("equal")
+    # # Plot rail geometry (select correct rail)
+    # _ax_2.plot(Y_forces_series)
+    # _ax_2.grid(True)
+    # _ax_2.set_title("Y Forces")
+    # # _ax_2.set_aspect("equal")
 
-    # Plot Q forces
-    _ax_3.plot(Q_forces_series)
-    _ax_3.grid(True)
-    _ax_3.set_title("Q Forces")
+    # # Plot Q forces
+    # _ax_3.plot(Q_forces_series)
+    # _ax_3.grid(True)
+    # _ax_3.set_title("Q Forces")
     
-    # Plot rail pos
-    _ax_4.plot(rail_position)
-    _ax_4.grid(True)
-    _ax_4.set_title("Rail Position")
+    # # Plot rail pos
+    # _ax_4.plot(rail_position)
+    # _ax_4.grid(True)
+    # _ax_4.set_title("Rail Position")
     
-    # Plot rail pos
-    _ax_5.plot(Wheelset_y_position)
-    _ax_5.grid(True)
-    _ax_5.set_title("Wheelset y Position")
+    # # Plot rail pos
+    # _ax_5.plot(np.array(Wheelset_y_position)-np.array(rail_position))
+    # _ax_5.grid(True)
+    # _ax_5.set_title("Wheelset y Position")
 
-    # Plot rail pos
-    _ax_6.plot(Wheelset_z_position)
-    _ax_6.grid(True)
-    _ax_6.set_title("Wheelset z Position")
-    # _ax_3.set_aspect("equal")
+    # # Plot rail pos
+    # _ax_6.plot(Wheelset_z_position)
+    # _ax_6.grid(True)
+    # _ax_6.set_title("Wheelset z Position")
+    # # _ax_3.set_aspect("equal")
 
-    # Refresh only
-    _fig.canvas.draw()
-    _fig.canvas.flush_events()
+    # # Refresh only
+    # _fig.canvas.draw()
+    # _fig.canvas.flush_events()
 
-    return dx
+    return dx, F_vector, force_vector_series, slip_series, creep_series
 
 
 def velocity_verlet_step(
@@ -342,7 +344,7 @@ def velocity_verlet_step(
     x_new_star = x_old + v_old * dt + 0.5 * a_old * dt**2
     # x_new = np.stack((x_new_star, x[6:12]), axis=0).flatten()
     x_new = np.concatenate([x_new_star, v_old])
-    a_star = force_func(
+    a_star, Force, force_vector_series, slip_series, creep_series = force_func(
         t,
         x_new,
         wheels,
@@ -356,10 +358,10 @@ def velocity_verlet_step(
     )
     a_new = a_star[6:12]
     v_new = v_old + 0.5 * (a_old + a_new) * dt
-    return x_new_star, v_new, a_new
+    return x_new_star, v_new, a_new, Force, force_vector_series, slip_series, creep_series
 
 wheels = [wheel(), wheel(lr=LEFT)]
-rails = [rail(), rail(lr=LEFT)]
+rails = [rail(rail_inclination=20), rail(lr=LEFT, rail_inclination=20)]
 
 n_patches = 3
 contact_eqs = [
@@ -370,12 +372,12 @@ contact_eqs = [
 material_model = material()
 
 kalker_tables = kalker_coefficients(material_properties=material_model)
-fastsim_patch = fastsim(discratization=30)
+fastsim_patch = fastsim(discratization=10)
 
-wheelset_mass = 780.0
-I_x = 80.0
-I_y = 350.0
-I_z = 350.0
+wheelset_mass = 1200.0
+I_x = 110.0
+I_y = 800.0
+I_z = 800.0
 
 patches_per_deltays_eq, result_state_pressure_eq = static_contact(
     [0],
@@ -384,7 +386,7 @@ patches_per_deltays_eq, result_state_pressure_eq = static_contact(
     contact_eqs[0],
     material_model,
     Q_solve=wheelset_mass * 9.81 / 2,
-    discretization=30
+    discretization=10
 )
 
 print(patches_per_deltays_eq["patch_0"][0][0])
@@ -403,36 +405,53 @@ input()
 
 x0 = np.zeros(12)
 x0[2] = patches_per_deltays_eq["patch_0"][0][0]
-x0[6] = 10 / 3.6
+x0[6] = 50 / 3.6
+x0[9] = -x0[6]/wheels[0].r0
 
 mass_vector = np.array([wheelset_mass, wheelset_mass, wheelset_mass, I_x, I_y, I_z])
 
-tspan = (0, 2)
-dt = 0.1e-3
+d_max = 20 # [m]
+
+tspan = (0, d_max / x0[6])
+dt = 0.5e-3
+
+print(f"Total simulation time: {tspan[1]} s with time step: {dt} s, with vehicle speed {x0[6]*3.6} km/h")
 
 t_eval = np.arange(tspan[0], tspan[1] + dt, dt)
 
-ds = 0.05e-3
-rail_y = np.zeros_like(t_eval)
-rail_y[len(t_eval)//4:len(t_eval)//2] = ds*np.arange(len(t_eval)//4)/(len(t_eval)//4)
-rail_y[len(t_eval)//2:len(t_eval)//4*3] = ds*np.flip(np.arange(len(t_eval)//4))/(len(t_eval)//4)
+d_impulse = 0.1e-3  # max displacement
+ds = 1e-5
+d_eval = np.arange(0, d_max + ds, ds)
 
-rail_y_interpolator = PchipInterpolator(t_eval, rail_y)
+ramp_start = 1
+ramp_end = 1.25
+start_index = int(ramp_start / ds)
+end_index = int(ramp_end / ds)
+
+ramp_length = end_index - start_index
+
+rail_y = np.zeros_like(d_eval)
+# rail_y[start_index:end_index] = d_impulse * np.linspace(0, 1, ramp_length)
+# rail_y[end_index:end_index+ramp_length*2] = - d_impulse * np.linspace(0, 2, ramp_length*2) + d_impulse
+# rail_y[end_index+ramp_length*2:end_index+ramp_length*3] = d_impulse * np.linspace(0, 1, ramp_length) - d_impulse
+# rail_y[ramp_end*2:] = 0,0
+
+rail_y_interpolator = PchipInterpolator(d_eval, rail_y)
 fig, ax = plt.subplots()
-ax.plot(t_eval, rail_y)
+ax.plot(d_eval, rail_y)
 plt.show()
 
 input()
 
-plt.ion()
+# plt.ion()
 
-_fig = None
-_ax_1 = None
-_ax_2 = None
-_ax_3 = None
-_ax_4 = None
-_ax_5 = None
-_ax_6 = None
+# _fig = None
+# _ax_1 = None
+# _ax_2 = None
+# _ax_3 = None
+# _ax_4 = None
+# _ax_5 = None
+# _ax_6 = None
 
 # sol = solve_ivp(
 #     dynamics,
@@ -467,32 +486,22 @@ _ax_6 = None
 # # Enable interactive mode
 # plt.ion()
 
-fig, axes = plt.subplots(3, 2, figsize=(12, 8))
-axes = axes.flatten()  # Flatten to 1D array for easy indexing
-
-names = ["x", "y", "z", "pitch", "yaw", "roll"]
-# Initialize empty lines for each subplot
-lines = []
-for i, ax in enumerate(axes):
-    (line,) = ax.plot([], [], "b-", linewidth=2)
-    lines.append(line)
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel(f"x[{i}]")
-    ax.set_title(f"State Variable {names[i]}")
-    ax.grid(True)
-
-fig.tight_layout()
-
 # Lists to store history for plotting
 time_history = []
 x_history = [[] for _ in range(6)]  # One list for each component
+v_history = [[] for _ in range(6)]  # One list for each component
+a_history = [[] for _ in range(6)]  # One list for each component
+Force_history = [[] for _ in range(6)]  # One list for each component
+force_vector_series_history = []  # To store force vectors for each time step
+slip_series_history = []  # To store slip values for each time step
+creep_series_history = []  # To store creep values for each time step
 
 x_old = x0
 a_old = np.zeros(6)
 
 t = 0
-for jj in range(len(t_eval)):
-    x_new, v_new, a_new = velocity_verlet_step(
+for jj in tqdm(range(len(t_eval))):
+    x_new, v_new, a_new, Force, force_vector_series, slip_series, creep_series = velocity_verlet_step(
         x_old,
         a_old,
         dt,
@@ -507,6 +516,8 @@ for jj in range(len(t_eval)):
         mass_vector,
         rail_y_interpolator,
     )
+    # print(force_vector_series)
+    # input()
     t += dt
     x_old = np.concatenate([x_new, v_new])
     # x_old = np.stack((x_new, v_new), axis=0).flatten()
@@ -516,6 +527,101 @@ for jj in range(len(t_eval)):
     time_history.append(t_eval[jj])
     for i in range(6):
         x_history[i].append(x_new[i])
+        v_history[i].append(v_new[i])
+        a_history[i].append(a_new[i])
+        Force_history[i].append(Force[i])
+    force_vector_series_history.append(force_vector_series)
+    slip_series_history.append(slip_series)
+    creep_series_history.append(creep_series)
+force_vector_series_history = np.array(force_vector_series_history)
+slip_series_history = np.array(slip_series_history)
+creep_series_history = np.array(creep_series_history)
+print(force_vector_series_history.shape)
+print(slip_series_history.shape)
+input()
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 8))
+axes[0].plot(time_history, force_vector_series_history[:, 0, 0], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 1, 0], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 2, 0], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 3, 0], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 4, 0], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 5, 0], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 0, 1], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 1, 1], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 2, 1], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 3, 1], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 4, 1], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 5, 1], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 0, 2], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 1, 2], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 2, 2], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 3, 2], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 4, 2], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 5, 2], linewidth=2)
+fig.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 8))
+axes[0].plot(time_history, force_vector_series_history[:, 0, 3], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 1, 3], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 2, 3], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 3, 3], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 4, 3], linewidth=2)
+axes[0].plot(time_history, force_vector_series_history[:, 5, 3], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 0, 4], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 1, 4], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 2, 4], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 3, 4], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 4, 4], linewidth=2)
+axes[1].plot(time_history, force_vector_series_history[:, 5, 4], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 0, 5], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 1, 5], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 2, 5], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 3, 5], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 4, 5], linewidth=2)
+axes[2].plot(time_history, force_vector_series_history[:, 5, 5], linewidth=2)
+fig.tight_layout()
+plt.show()
+    
+fig, axes = plt.subplots(1, 3, figsize=(12, 8))
+axes[0].plot(time_history, slip_series_history[:, 0, 0], linewidth=2)
+axes[0].plot(time_history, slip_series_history[:, 1, 0], linewidth=2)
+axes[0].plot(time_history, slip_series_history[:, 2, 0], linewidth=2)
+axes[0].plot(time_history, slip_series_history[:, 3, 0], linewidth=2)
+axes[0].plot(time_history, slip_series_history[:, 4, 0], linewidth=2)
+axes[0].plot(time_history, slip_series_history[:, 5, 0], linewidth=2)
+axes[1].plot(time_history, slip_series_history[:, 0, 1], linewidth=2)
+axes[1].plot(time_history, slip_series_history[:, 1, 1], linewidth=2)
+axes[1].plot(time_history, slip_series_history[:, 2, 1], linewidth=2)
+axes[1].plot(time_history, slip_series_history[:, 3, 1], linewidth=2)
+axes[1].plot(time_history, slip_series_history[:, 4, 1], linewidth=2)
+axes[1].plot(time_history, slip_series_history[:, 5, 1], linewidth=2)
+axes[2].plot(time_history, slip_series_history[:, 0, 2], linewidth=2)
+axes[2].plot(time_history, slip_series_history[:, 1, 2], linewidth=2)
+axes[2].plot(time_history, slip_series_history[:, 2, 2], linewidth=2)
+axes[2].plot(time_history, slip_series_history[:, 3, 2], linewidth=2)
+axes[2].plot(time_history, slip_series_history[:, 4, 2], linewidth=2)
+axes[2].plot(time_history, slip_series_history[:, 5, 2], linewidth=2)
+fig.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 8))
+axes[0].plot(time_history, creep_series_history[:, 0, 0], linewidth=2)
+axes[0].plot(time_history, creep_series_history[:, 1, 0], linewidth=2)
+axes[0].plot(time_history, creep_series_history[:, 2, 0], linewidth=2)
+axes[0].plot(time_history, creep_series_history[:, 3, 0], linewidth=2)
+axes[0].plot(time_history, creep_series_history[:, 4, 0], linewidth=2)
+axes[0].plot(time_history, creep_series_history[:, 5, 0], linewidth=2)
+axes[1].plot(time_history, creep_series_history[:, 0, 1], linewidth=2)
+axes[1].plot(time_history, creep_series_history[:, 1, 1], linewidth=2)
+axes[1].plot(time_history, creep_series_history[:, 2, 1], linewidth=2)
+axes[1].plot(time_history, creep_series_history[:, 3, 1], linewidth=2)
+axes[1].plot(time_history, creep_series_history[:, 4, 1], linewidth=2)
+axes[1].plot(time_history, creep_series_history[:, 5, 1], linewidth=2)
+fig.tight_layout()
+plt.show()
+    
 
     # Update each subplot
     # for i in range(6):
@@ -532,10 +638,72 @@ for jj in range(len(t_eval)):
     # fig.canvas.draw()
     # fig.canvas.flush_events()
 
-    print(f"Time: {t_eval[jj]:.4f} s")
+    # print(f"Time: {t_eval[jj]:.4f} s")
 
     # Optional: slow down visualization
     # time.sleep(0.01)
+
+fig, axes = plt.subplots(3, 2, figsize=(12, 8))
+axes = axes.flatten()  # Flatten to 1D array for easy indexing
+
+names = ["x", "y", "z", "pitch", "yaw", "roll"]
+# Initialize empty lines for each subplot
+for i, ax in enumerate(axes):
+    ax.plot(time_history, x_history[i], "b-", linewidth=2)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel(f"x[{i}]")
+    ax.set_title(f"State Variable {names[i]}")
+    ax.grid(True)
+
+fig.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(3, 2, figsize=(12, 8))
+axes = axes.flatten()  # Flatten to 1D array for easy indexing
+
+names = ["x", "y", "z", "pitch", "yaw", "roll"]
+# Initialize empty lines for each subplot
+for i, ax in enumerate(axes):
+    ax.plot(time_history, v_history[i], "b-", linewidth=2)
+    if names[i] in ["pitch"]:
+        ax.plot(time_history, -1*np.array(v_history[0])/wheels[0].r0, "r-.", linewidth=2)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel(f"v[{i}]")
+    ax.set_title(f"State Velocity {names[i]}")
+    ax.grid(True)
+
+fig.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(3, 2, figsize=(12, 8))
+axes = axes.flatten()  # Flatten to 1D array for easy indexing
+
+names = ["x", "y", "z", "pitch", "yaw", "roll"]
+# Initialize empty lines for each subplot
+for i, ax in enumerate(axes):
+    ax.plot(time_history, a_history[i], "b-", linewidth=2)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel(f"a[{i}]")
+    ax.set_title(f"State Acceleration {names[i]}")
+    ax.grid(True)
+
+fig.tight_layout()
+plt.show()
+
+fig, axes = plt.subplots(3, 2, figsize=(12, 8))
+axes = axes.flatten()  # Flatten to 1D array for easy indexing
+
+names = ["x", "y", "z", "pitch", "yaw", "roll"]
+# Initialize empty lines for each subplot
+for i, ax in enumerate(axes):
+    ax.plot(time_history, Force_history[i], "b-", linewidth=2)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel(f"Force[{i}]")
+    ax.set_title(f"Force Variable {names[i]}")
+    ax.grid(True)
+
+fig.tight_layout()
+plt.show()
 
 # plt.ioff()  # Turn off interactive mode
 # plt.show()  # Keep final plot open

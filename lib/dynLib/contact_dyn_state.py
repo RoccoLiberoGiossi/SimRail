@@ -38,3 +38,7 @@ class dynamic_state:
         self.state_a_pitch = state_a_pitch
         self.state_a_yaw = state_a_yaw
         self.state_a_roll = state_a_roll
+
+class patch_dynamic_state:
+    def __init__(self):
+        pass

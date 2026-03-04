@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 from typing import Union
 
-from scipy.optimize import root
+from scipy.optimize import root, brentq
 from scipy.integrate import simpson
 from scipy import interpolate
 from scipy.interpolate import PchipInterpolator

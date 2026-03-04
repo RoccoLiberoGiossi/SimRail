@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from lib.contact_settings import *
 from lib.contact_material import material
 from lib.geoLib.contact_wheel_rail import wheel, rail
+from lib.jittable_functions import interpolator
 
 class normal_contact:
     def __init__(
@@ -71,8 +72,18 @@ class eqv_el_normal_contact(normal_contact):
 
         Width = np.abs(LocalX[0] - LocalX[-1])
         Area = np.trapz(Shape, LocalX)
+
+        # alpha = np.array([brentq(
+        #     self.findAlpha, 
+        #     1e-12,           # Lower bound
+        #     np.pi - 1e-12,   # Upper bound  
+        #     args=(Area, Width),
+        #     xtol=1e-8
+        # )])
+
         root_aplha = root(self.findAlpha, np.pi / 100, args=(Area, Width))
         alpha = root_aplha.x
+
         RadiusEqv = Width / 2 / np.sin(alpha / 2)
         approach_0 = RadiusEqv * 2 * np.sin(alpha / 4) ** 2
         self.approach = approach_0 / 0.55
@@ -132,29 +143,25 @@ class eqv_el_normal_contact(normal_contact):
         RotationMatrix: np.ndarray[float, float],
         ContactRotationAngle: float,
     ):
+        
+        idx0 = contact_indexes[0]
+
+        wheel_y = interpolator(centroid, LocalX, 
+                            WheelCoorLocalNormal - wheel_interp[idx0])
+        rail_y = interpolator(centroid, LocalX,
+                        RailCoorLocalNormal - Rail.rail_profile_pos[idx0, 1])
+
         centroidWheelNormal = np.array(
             [
                 [centroid],
-                [
-                    np.interp(
-                        centroid,
-                        LocalX,
-                        WheelCoorLocalNormal - wheel_interp[contact_indexes[0]],
-                    )
-                ],
+                [wheel_y],
                 [0],
             ]
         )
         centroidRailNormal = np.array(
             [
                 [centroid],
-                [
-                    np.interp(
-                        centroid,
-                        LocalX,
-                        RailCoorLocalNormal - Rail.rail_profile_pos[contact_indexes[0], 1],
-                    )
-                ],
+                [rail_y],
                 [0],
             ]
         )
@@ -163,12 +170,10 @@ class eqv_el_normal_contact(normal_contact):
         # At the moment it is a float number but should be a coordinate vector
         centroidWheel_1 = RotationMatrix.T @ centroidWheelNormal
         centroidRail_1 = RotationMatrix.T @ centroidRailNormal
-        self.centroid_wheel = (
-            centroidWheel_1[0] + Rail.rail_profile_pos[contact_indexes[0], 0]
-        )
-        self.centroid_rail = (
-            centroidRail_1[0] + Rail.rail_profile_pos[contact_indexes[0], 0]
-        )
+
+        rail_x_offset = Rail.rail_profile_pos[contact_indexes[0], 0]
+        self.centroid_wheel = (centroidWheel_1[0] + rail_x_offset)
+        self.centroid_rail = (centroidRail_1[0] + rail_x_offset)
 
         # TODO:
         # centroidRadius = np.interp(

@@ -2,6 +2,7 @@ from lib.contact_settings import *
 from lib.geoLib.contact_wheel_rail import wheel, rail
 from lib.normLib.contact_methods import eqv_el_normal_contact, kik_pio_normal_contact
 from lib.contact_material import material
+from lib.jittable_functions import interpolator
 
 class NormalContactSolver:
     def __init__(
@@ -35,56 +36,60 @@ class NormalContactSolver:
         discretization: int = 58
     ):
 
-        if not isinstance(Wheel, wheel):
-            raise TypeError("Error in contact forces calculation: wheel not given")
-
-        if not isinstance(Rail, rail):
-            raise TypeError("Error in contact forces calculation: rail not given")
-
-        if not isinstance(material_model, material):
-            raise TypeError("Error in contact forces calculation: no material provided")
-
-        if not isinstance(discretization, int):
-            raise TypeError(
-                "Error in contact forces calculation: discretization is not an integer"
-            )
+        rail_x = Rail.rail_profile_pos[:, 0]
+        rail_y = Rail.rail_profile_pos[:, 1]
         
-        WheelInt = np.interp(
-            Rail.rail_profile_pos[:, 0],
+        WheelInt = interpolator(
+            rail_x,
             Wheel.wheel_profile_pos[:, 0],
             Wheel.wheel_profile_pos[:, 1],
         )
-        radius = np.interp(
-            Rail.rail_profile_pos[:, 0],
+        radius = interpolator(
+            rail_x,
             Wheel.wheel_radius[:, 0],
             Wheel.wheel_radius[:, 1],
         )
 
-        ContactPos = np.where((WheelInt - Rail.rail_profile_pos[:, 1]) > 0)[0]
+        # ContactPos = np.where((WheelInt - Rail.rail_profile_pos[:, 1]) > 0)[0]
+        contact_mask = WheelInt > rail_y
+        ContactPos = np.flatnonzero(contact_mask)
+        
+        if len(ContactPos) <= 2:
+            for patch in self.contact_patches[:self.n_patches]:
+                patch.reset_to_zero()
+            return
+        
+        gaps = np.diff(ContactPos) > 1
 
-        if len(ContactPos) > 2:
-            indices = np.where(np.diff(ContactPos) > 1)[0] + 1
-            ContactPosNs = np.split(ContactPos, indices)
-            ContactPosNs_sorted = sorted(ContactPosNs, key=len, reverse=True)
-
-            for counter in range(self.n_patches):
-                self.contact_patches[counter].reset_to_zero()
-
-            for counter in range(self.n_patches):
-                if counter < len(ContactPosNs_sorted):
-                    self.contact_forces(
-                        ContactPosNs_sorted[counter],
-                        Wheel,
-                        WheelInt,
-                        Rail,
-                        radius,
-                        discretization,
-                        counter,
-                        material_model,
-                    )
+        if not np.any(gaps):
+            # Single continuous region
+            ContactPosNs = [ContactPos]
         else:
-            for counter in range(self.n_patches):
-                self.contact_patches[counter].reset_to_zero()
+            # Split at gaps
+            split_indices = np.flatnonzero(gaps) + 1
+            ContactPosNs = np.split(ContactPos, split_indices)
+
+        if len(ContactPosNs) > 1:
+            ContactPosNs_sorted = sorted(ContactPosNs, key=len, reverse=True)
+        else:
+            ContactPosNs_sorted = ContactPosNs
+
+        for patch in self.contact_patches[:self.n_patches]:
+            patch.reset_to_zero()
+
+        n_active = min(self.n_patches, len(ContactPosNs_sorted))
+    
+        for counter in range(n_active):
+            self.contact_forces(
+                ContactPosNs_sorted[counter],
+                Wheel,
+                WheelInt,
+                Rail,
+                radius,
+                discretization,
+                counter,
+                material_model,
+            )
 
     def contact_forces(
         self,
@@ -117,48 +122,34 @@ class NormalContactSolver:
             )
         )
 
-        WheelCoor = np.vstack(
-            (
-                np.reshape(
-                    Rail.rail_profile_pos[contact_indexes, 0], [1, len(contact_indexes)]
-                )
-                - Rail.rail_profile_pos[contact_indexes[0], 0],
-                np.reshape(wheel_interp[contact_indexes], [1, len(contact_indexes)])
-                - wheel_interp[contact_indexes[0]],
-                np.zeros([1, len(contact_indexes)]),
-            )
-        )
-        RadiusCoor = np.vstack(
-            (
-                np.reshape(
-                    Rail.rail_profile_pos[contact_indexes, 0], [1, len(contact_indexes)]
-                )
-                - Rail.rail_profile_pos[contact_indexes[0], 0],
-                np.reshape(radius_interp[contact_indexes], [1, len(contact_indexes)])
-                - radius_interp[contact_indexes[0]],
-                np.zeros([1, len(contact_indexes)]),
-            )
-        )
-        RailCoor = np.vstack(
-            (
-                np.reshape(
-                    Rail.rail_profile_pos[contact_indexes, 0], [1, len(contact_indexes)]
-                )
-                - Rail.rail_profile_pos[contact_indexes[0], 0],
-                np.reshape(
-                    Rail.rail_profile_pos[contact_indexes, 1], [1, len(contact_indexes)]
-                )
-                - Rail.rail_profile_pos[contact_indexes[0], 1],
-                np.zeros([1, len(contact_indexes)]),
-            )
-        )
+        n_contacts = len(contact_indexes)
+        rail_x = Rail.rail_profile_pos[contact_indexes, 0]
+        rail_y = Rail.rail_profile_pos[contact_indexes, 1]
+
+        WheelCoor = np.empty((3, n_contacts))
+        WheelCoor[0, :] = rail_x - rail_x[0]
+        WheelCoor[1, :] = wheel_interp[contact_indexes] - wheel_interp[contact_indexes[0]]
+        WheelCoor[2, :] = 0
+        
+        RadiusCoor = np.empty((3, n_contacts))
+        RadiusCoor[0, :] = rail_x - rail_x[0]
+        RadiusCoor[1, :] = radius_interp[contact_indexes] - radius_interp[contact_indexes[0]]
+        RadiusCoor[2, :] = 0
+        
+        RailCoor = np.empty((3, n_contacts))
+        RailCoor[0, :] = rail_x - rail_x[0]
+        RailCoor[1, :] = rail_y - rail_y[0]
+        RailCoor[2, :] = 0
 
         # TODO: in future, the rotation matrix must be substituted with quaternion for a better
         # representation and a more stable computation.
+        cos_alpha = np.cos(ContactRotationAngle)
+        sin_alpha = np.sin(ContactRotationAngle)
+
         RotationMatrix = np.array(
             [
-                [np.cos(ContactRotationAngle), -np.sin(ContactRotationAngle), 0],
-                [np.sin(ContactRotationAngle), np.cos(ContactRotationAngle), 0],
+                [cos_alpha, -sin_alpha, 0],
+                [sin_alpha, cos_alpha, 0],
                 [0, 0, 1],
             ]
         )
@@ -170,23 +161,21 @@ class NormalContactSolver:
         LocalX = np.linspace(RailCoorLocal[0, 0], RailCoorLocal[0, -1], num=discretization)
 
         WheelCoorLocalNormal = (
-            np.interp(LocalX, WheelCoorLocal[0, :], WheelCoorLocal[1, :])
+            interpolator(LocalX, WheelCoorLocal[0, :], WheelCoorLocal[1, :])
             + wheel_interp[contact_indexes[0]]
         )
         RadiusCoorLocalNormal = (
-            np.interp(LocalX, RadiusCoorLocal[0, :], RadiusCoorLocal[1, :])
+            interpolator(LocalX, RadiusCoorLocal[0, :], RadiusCoorLocal[1, :])
             + radius_interp[contact_indexes[0]]
         )
         RailCoorLocalNormal = (
-            np.interp(LocalX, RailCoorLocal[0, :], RailCoorLocal[1, :])
+            interpolator(LocalX, RailCoorLocal[0, :], RailCoorLocal[1, :])
             + Rail.rail_profile_pos[contact_indexes[0], 1]
         )
 
         if isinstance(self.contact_model, eqv_el_normal_contact):
             # assign radius for eq contact model
-            Rlocal = RadiusCoorLocalNormal[int(discretization / 2)] / np.cos(
-                ContactRotationAngle
-            )
+            Rlocal = RadiusCoorLocalNormal[int(discretization / 2)] / cos_alpha
             # assign shape of the contact patch for the equivalent contact model
             Shape = WheelCoorLocalNormal - RailCoorLocalNormal
             # assign contact model for the local contact patch
@@ -214,9 +203,7 @@ class NormalContactSolver:
 
         elif isinstance(self.contact_model, kik_pio_normal_contact):
 
-            Rlocal = RadiusCoorLocalNormal / np.cos(
-                ContactRotationAngle
-            )
+            Rlocal = RadiusCoorLocalNormal / cos_alpha
 
             max_shape = np.max(WheelCoorLocalNormal - RailCoorLocalNormal)
             approach_0 = 0.55 * max_shape
