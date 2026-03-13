@@ -58,8 +58,8 @@ def contact_local_to_global(F_x, F_y, Q_force, Y_force, yaw, roll, contact_angle
 
     # print(R_wheel @ F_local)
 
-    return F_local
-    # return R_wheel @ F_local
+    # return F_local
+    return R_wheel @ F_local
 
 
 def dynamics(
@@ -138,62 +138,29 @@ def dynamics(
                 v_forward = v[0] if np.abs(v[0]) > 1e-6 else 1e-6 # Avoid hard zero
                 v_inv = 1.0 / v_forward
 
+                nu_x, nu_y, phi = 0.0, 0.0, 0.0
+
                 if wheel.lr == RIGHT:
 
                     long_disp = contact_radius*tan_gamma*q[4]
-                    v_x = v[0] - np.abs(centroid)*v[4] + contact_radius*v[3]
-                    v_y = v[1] + contact_radius*v[3]*q[4] - contact_radius*v[5]
-                    v_z = v[2] + np.abs(centroid)*v[5] - long_disp*v[3]
+                    v_x = v[0] - np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
+                    v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] - contact_radius*v[5]
+                    v_z = v[2] + np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
 
                     nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
                     nu_y = v_inv * (v_y * cos_gamma - v_z * sin_gamma)
-                    phi = v_inv * (v[4] * cos_gamma + v[3] * sin_gamma)
-
-                    # nu_x = v_inv * (v[3]*contact_radius - v[0] - np.abs(centroid)*v[4] * cos_gamma)
-                    # nu_y = v_inv * v[1] * cos_gamma + q[4] * cos_gamma + v_inv*v[3]*contact_radius*sin_gamma
-                    # phi = - v_inv * (v[4] * sin_gamma + v[3] * sin_gamma) * cos_gamma
+                    phi = v_inv * (v[4] * cos_gamma + (-v[0]/wheel.r0 + v[3]) * sin_gamma)
 
                 elif wheel.lr == LEFT:
 
                     long_disp = -contact_radius*tan_gamma*q[4]
-                    v_x = v[0] + np.abs(centroid)*v[4] + contact_radius*v[3]
-                    v_y = v[1] + contact_radius*v[3]*q[4] + contact_radius*v[5]
-                    v_z = v[2] - np.abs(centroid)*v[5] - long_disp*v[3]
+                    v_x = v[0] + np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
+                    v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] + contact_radius*v[5]
+                    v_z = v[2] - np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
 
                     nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
                     nu_y = v_inv * (v_y * cos_gamma + v_z * sin_gamma)
-                    phi = v_inv * (v[4] * cos_gamma - v[3] * sin_gamma)
-
-                    # nu_x = v_inv * (v[3]*contact_radius + v[0] - np.abs(centroid)*v[4] * cos_gamma)
-                    # nu_y = v_inv * v[1] * cos_gamma + q[4] * cos_gamma - v_inv*v[3]*contact_radius*sin_gamma
-                    # phi = v_inv * (v[4] * sin_gamma + v[3] * sin_gamma) * cos_gamma
-                
-                # if wheel.lr == RIGHT:
-
-                #     long_disp = contact_radius*tan_gamma*q[4]
-                #     v_x = v[0] - np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
-                #     v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] - contact_radius*v[5]
-                #     v_z = v[2] + np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
-
-                #     nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
-                #     nu_y = v_inv * (v_y * cos_gamma - v_z * sin_gamma)
-                #     phi = v_inv * (v[4] * cos_gamma + (-v[0]/wheel.r0 + v[3]) * sin_gamma)
-
-                # elif wheel.lr == LEFT:
-
-                #     long_disp = -contact_radius*tan_gamma*q[4]
-                #     v_x = v[0] + np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
-                #     v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] + contact_radius*v[5]
-                #     v_z = v[2] - np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
-
-                #     nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
-                #     nu_y = v_inv * (v_y * cos_gamma + v_z * sin_gamma)
-                #     phi = v_inv * (v[4] * cos_gamma - (-v[0]/wheel.r0 + v[3]) * sin_gamma)
-
-                # print(f"nu_x: {nu_x}, nu_y: {nu_y}, phi: {phi}, cos_gamma: {cos_gamma}, sin_gamma: {sin_gamma}, cos_yaw: {cos_yaw}, sin_yaw: {sin_yaw}")
-                # print(f"v_x: {v_x}, v_y: {v_y}, v_z: {v_z}")
-                # print(f"v_inv: {v_inv}, v_forward: {v_forward}, cose1: {np.abs(centroid)*v[4]}, cose2: {contact_radius*(-v[0]/wheel.r0 + v[3])}")
-                # input()
+                    phi = v_inv * (v[4] * cos_gamma - (-v[0]/wheel.r0 + v[3]) * sin_gamma)
 
                 creep = tangent_creepage(nu_x=nu_x, nu_y=nu_y, phi=phi)
 
@@ -235,11 +202,11 @@ def dynamics(
                 # delta_rs.append(delta_r)
                 # centroids.append(contacts.centroid_wheel.item())
 
-                F_vector[0] -= force_vector[0]/100
+                F_vector[0] += force_vector[0]
                 F_vector[1] += force_vector[1]
                 F_vector[2] += force_vector[2]
-                F_vector[3] += contact_radius * force_vector[0]/100
-                F_vector[4] -= centroid * force_vector[0]/100
+                F_vector[3] -= contact_radius * force_vector[0]
+                F_vector[4] -= centroid * force_vector[0]
                 F_vector[5] += centroid * force_vector[2]
 
             else:
@@ -322,11 +289,9 @@ def dynamics(
 
     # # Refresh only
     # _fig.canvas.draw()
-    # _fig.canvas.flush_events()
+    # fig.canvas.flush_events()
 
-    print(f"doing...{t}")
-
-    return dx, F_vector, force_vector_series, slip_series, creep_series, variable_series
+    return dx#, F_vector, force_vector_series, slip_series, creep_series, variable_series
 
 
 def velocity_verlet_step(
@@ -385,7 +350,7 @@ I_y = 800.0
 I_z = 800.0
 
 patches_per_deltays_eq, result_state_pressure_eq = static_contact(
-    [0],
+    np.array([0]),
     wheels[0],
     rails[0],
     contact_eqs[0],
@@ -397,7 +362,7 @@ patches_per_deltays_eq, result_state_pressure_eq = static_contact(
 print(patches_per_deltays_eq["patch_0"][0][0])
 
 patches_per_deltays_eq, result_state_pressure_eq = static_contact(
-    [0],
+    np.array([0]),
     wheels[1],
     rails[1],
     contact_eqs[1],
@@ -410,35 +375,41 @@ input()
 
 x0 = np.zeros(12)
 x0[2] = patches_per_deltays_eq["patch_0"][0][0]
-x0[6] = 50 / 3.6
+x0[6] = 10 / 3.6
 x0[9] = -x0[6]/wheels[0].r0
 
 mass_vector = np.array([wheelset_mass, wheelset_mass, wheelset_mass, I_x, I_y, I_z])
 
-d_max = 5 # [m]
+d_max = 15 # [m]
 
 tspan = (0, d_max / x0[6])
-dt = 0.1e-3
+dt = 0.5e-3
 
 print(f"Total simulation time: {tspan[1]} s with time step: {dt} s, with vehicle speed {x0[6]*3.6} km/h")
 
-t_eval = np.arange(tspan[0], tspan[1] + dt, dt)
+t_eval = np.linspace(tspan[0], tspan[1], int(tspan[1] / dt))
 
-d_impulse = 0.1e-3  # max displacement
+d_impulse = 0.01e-3  # max displacement
 ds = 1e-5
 d_eval = np.arange(0, d_max + ds, ds)
 
 ramp_start = 1
-ramp_end = 1.25
+ramp_end = 3
 start_index = int(ramp_start / ds)
 end_index = int(ramp_end / ds)
 
 ramp_length = end_index - start_index
 
 rail_y = np.zeros_like(d_eval)
-# rail_y[start_index:end_index] = d_impulse * np.linspace(0, 1, ramp_length)
-# rail_y[end_index:end_index+ramp_length*2] = - d_impulse * np.linspace(0, 2, ramp_length*2) + d_impulse
-# rail_y[end_index+ramp_length*2:end_index+ramp_length*3] = d_impulse * np.linspace(0, 1, ramp_length) - d_impulse
+
+# 1. Smooth ramp up
+rail_y[start_index:end_index] = d_impulse * 0.5 * (1 - np.cos(np.pi * np.linspace(0, 1, ramp_length)))
+
+# 2. Smooth transition from peak to trough
+rail_y[end_index:end_index + ramp_length * 2] = d_impulse * np.cos(np.pi * np.linspace(0, 1, ramp_length * 2))
+
+# 3. Smooth ramp from trough back to zero
+rail_y[end_index + ramp_length * 2:end_index + ramp_length * 3] = -d_impulse * 0.5 * (1 + np.cos(np.pi * np.linspace(0, 1, ramp_length)))
 # rail_y[ramp_end*2:] = 0,0
 
 rail_y_interpolator = PchipInterpolator(d_eval, rail_y)
@@ -458,35 +429,54 @@ input()
 # _ax_5 = None
 # _ax_6 = None
 
-sol = solve_ivp(
-    dynamics,
-    tspan,
-    x0,
-    t_eval=t_eval,
-    method="RK45",
-    max_step=dt,
-    args=(
-        wheels,
-        rails,
-        contact_eqs,
-        material_model,
-        fastsim_patch,
-        kalker_tables,
-        mass_vector,
-        rail_y_interpolator,
-    ),  # pass extra parameters
-)
+with tqdm(total=tspan[1], unit="s", desc="Simulation Progress") as pbar:
+    last_t = [0]
+
+    def dynamics_with_progress(t, x, *args):
+        # Update progress bar only when t increases
+        if t > last_t[0]:
+            pbar.update(t - last_t[0])
+            last_t[0] = t
+        return dynamics(t, x, *args)
+
+    sol = solve_ivp(
+        dynamics_with_progress,
+        tspan,
+        x0,
+        t_eval=t_eval,
+        method="Radau",
+        max_step=dt,
+        args=(
+            wheels,
+            rails,
+            contact_eqs,
+            material_model,
+            fastsim_patch,
+            kalker_tables,
+            mass_vector,
+            rail_y_interpolator,
+        ),  # pass extra parameters
+    )
 
 # # plt.ioff()  # Turn off interactive mode
 # # plt.show()  # Keep final plot open
 
-fig, axes = plt.subplots(3, 2, figsize=(12, 8))
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
 axes = axes.flatten()
 for i, ax in enumerate(axes):
     ax.plot(sol.t, sol.y[i, :])
 
 fig.tight_layout()
 plt.show()
+
+fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+axes = axes.flatten()
+for i, ax in enumerate(axes):
+    ax.plot(sol.t, sol.y[i+6, :])
+
+fig.tight_layout()
+plt.show()
+
 input()
 
 # # Enable interactive mode

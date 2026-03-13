@@ -123,6 +123,6 @@ def compute_fastsim_core(
     F_x *= q_r
     F_y *= q_r
 
-    print(xx.shape, yy.shape, p_x.shape, p_y.shape, s_x.shape, s_y.shape, s_out.shape, g_bound.shape)
+    # print(xx.shape, yy.shape, p_x.shape, p_y.shape, s_x.shape, s_y.shape, s_out.shape, g_bound.shape)
     
     return p_x, p_y, s_x, s_y, s_out, g_bound, F_x, F_y
