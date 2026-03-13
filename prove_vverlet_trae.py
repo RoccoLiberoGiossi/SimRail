@@ -9,6 +9,7 @@ from lib.contact_material import kalker_coefficients
 from calc_routines.determine_static_contact import static_contact
 
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 from scipy.integrate import solve_ivp
 import time
 from tqdm import tqdm
@@ -56,9 +57,6 @@ def contact_local_to_global(F_x, F_y, Q_force, Y_force, yaw, roll, contact_angle
 
     R_wheel = Rz(yaw) @ Rx(roll)
 
-    # print(R_wheel @ F_local)
-
-    # return F_local
     return R_wheel @ F_local
 
 
@@ -113,18 +111,21 @@ def dynamics(
     creep_series = []
     variable_series = []
 
-    for index, wheel in enumerate(wheels):
+    # wheels = [wheel(), wheel(lr=LEFT)]
+    rails = [rail(rail_inclination=20), rail(lr=LEFT, rail_inclination=20)]
 
-        wheel.set_dynamic_state(new_state)
-        wheel.calculate_position()
+    for index, wheel_comp in enumerate(wheels):
+
+        wheel_comp.set_dynamic_state(new_state)
+        wheel_comp.calculate_position()
 
         rails[index].calculate_position(y_rail, 0)
 
-        contact_eq_s[index].patch_search(wheel, rails[index], material_model, discretization=10)
+        contact_eq_s[index].patch_search(wheel_comp, rails[index], material_model, discretization=58)
 
-        for _, contacts in enumerate(contact_eq_s[index].contact_patches):
+        for contact_number, contacts in enumerate(contact_eq_s[index].contact_patches):
             contact_radius = contacts.Rlocal
-            delta_r = wheel.r0 - contact_radius
+            delta_r = wheel_comp.r0 - contact_radius
             if type(contacts.centroid_wheel) != int:
                 
                 centroid = contacts.centroid_wheel.item()
@@ -134,33 +135,32 @@ def dynamics(
                 sin_gamma = np.sin(contacts.contact_angle)
                 cos_yaw = np.cos(q[4])
                 sin_yaw = np.sin(q[4])
-                # v_inv = 1 / v[0] if v[0] != 0 else 0
                 v_forward = v[0] if np.abs(v[0]) > 1e-6 else 1e-6 # Avoid hard zero
                 v_inv = 1.0 / v_forward
 
                 nu_x, nu_y, phi = 0.0, 0.0, 0.0
 
-                if wheel.lr == RIGHT:
+                # if wheel.lr == RIGHT:
 
-                    long_disp = contact_radius*tan_gamma*q[4]
-                    v_x = v[0] - np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
-                    v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] - contact_radius*v[5]
-                    v_z = v[2] + np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
+                #     long_disp = contact_radius*tan_gamma*q[4]
+                #     v_x = v[0] - np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
+                #     v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] - contact_radius*v[5]
+                #     v_z = v[2] + np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
 
-                    nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
-                    nu_y = v_inv * (v_y * cos_gamma - v_z * sin_gamma)
-                    phi = v_inv * (v[4] * cos_gamma + (-v[0]/wheel.r0 + v[3]) * sin_gamma)
+                #     nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
+                #     nu_y = v_inv * (v_y * cos_gamma - v_z * sin_gamma)
+                #     phi = v_inv * (v[4] * cos_gamma + (-v[0]/wheel.r0 + v[3]) * sin_gamma)
 
-                elif wheel.lr == LEFT:
+                # elif wheel.lr == LEFT:
 
-                    long_disp = -contact_radius*tan_gamma*q[4]
-                    v_x = v[0] + np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
-                    v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] + contact_radius*v[5]
-                    v_z = v[2] - np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
+                #     long_disp = -contact_radius*tan_gamma*q[4]
+                #     v_x = v[0] + np.abs(centroid)*v[4] + contact_radius*(-v[0]/wheel.r0 + v[3])
+                #     v_y = v[1] + contact_radius*(-v[0]/wheel.r0 + v[3])*q[4] + contact_radius*v[5]
+                #     v_z = v[2] - np.abs(centroid)*v[5] - long_disp*(-v[0]/wheel.r0 + v[3])
 
-                    nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
-                    nu_y = v_inv * (v_y * cos_gamma + v_z * sin_gamma)
-                    phi = v_inv * (v[4] * cos_gamma - (-v[0]/wheel.r0 + v[3]) * sin_gamma)
+                #     nu_x = v_inv * (v_x * cos_yaw + v_y * sin_yaw)
+                #     nu_y = v_inv * (v_y * cos_gamma + v_z * sin_gamma)
+                #     phi = v_inv * (v[4] * cos_gamma - (-v[0]/wheel.r0 + v[3]) * sin_gamma)
 
                 creep = tangent_creepage(nu_x=nu_x, nu_y=nu_y, phi=phi)
 
@@ -168,8 +168,18 @@ def dynamics(
                     contacts, material_model, kalker_tables, creep, new_state
                 )
 
-                # print(tangent_method.F_x, tangent_method.F_y, contacts.centroid_wheel.item(), wheel.lr)
-                # input()
+                # if np.abs(tangent_method.F_x) > 100e3 or np.abs(tangent_method.F_y) > 100e3 or np.abs(contacts.Q_force) > 100e3 or np.abs(contacts.Y_force) > 100e3:
+                #     print("High tangential force detected! Check creep values and contact conditions.")
+                #     print(f"Contact patch {contact_number} for wheel {index} has unusually high forces.")
+                #     print(f"nu_x: {nu_x}, nu_y: {nu_y}, phi: {phi}")
+                #     print(f"Contact radius: {contact_radius}, Centroid: {centroid}")
+                #     print(f"Contact angle: {contacts.contact_angle}")
+                #     print(f"F_x: {tangent_method.F_x}, F_y: {tangent_method.F_y}")
+                #     print(f"Wheel velocity: {v_forward}, v_x: {v_x}, v_y: {v_y}, v_z: {v_z}")
+                #     print(f"Wheel state: {new_state}")
+                #     print(f"Wheel a: {contacts.semi_axis_a}, b: {contacts.semi_axis_b}")
+                #     print(f"Wheel Q: {contacts.Q_force}, Y: {contacts.Y_force}")
+                #     input()
 
                 force_vector = contact_local_to_global(
                     tangent_method.F_x,
@@ -186,22 +196,6 @@ def dynamics(
                 creep_series.append(np.array([tangent_method.F_x, tangent_method.F_y]))
                 variable_series.append(np.array([contact_radius, contacts.contact_angle]))
 
-                # print(force_vector)
-                # input()
-
-                # Y_forces.append(contacts.Y_force)
-                # Q_forces.append(contacts.Q_force)
-                # # Fx_forces.append(tangent_method.F_x)
-                # # Fy_forces.append(tangent_method.F_y)
-                # # moments_pitch.append(contact_radius * tangent_method.F_x)
-                # # moments_yaw.append(contacts.centroid_wheel.item() * tangent_method.F_x)
-                # # moments_roll.append(contacts.centroid_wheel.item() * contacts.Q_force)
-                # creep_xs.append(nu_x)
-                # creep_ys.append(nu_y)
-                # phi_s.append(phi)
-                # delta_rs.append(delta_r)
-                # centroids.append(contacts.centroid_wheel.item())
-
                 F_vector[0] += force_vector[0]
                 F_vector[1] += force_vector[1]
                 F_vector[2] += force_vector[2]
@@ -215,81 +209,8 @@ def dynamics(
                 creep_series.append(np.zeros(2))
                 variable_series.append(np.zeros(2))
 
-    # Y_forces_series.append(Y_forces)
-    # Q_forces_series.append(Q_forces)
-    # rail_position.append(y_rail)
-    # Wheelset_y_position.append(new_state.state_y)
-    # Wheelset_z_position.append(new_state.state_z)
-
     F_vector[2] -= wheelset_mass[0] * 9.81
-    # print(f"Total Force Vector: {F_vector}")
     dx[6:12] = -F_vector / wheelset_mass
-
-    # print(f"doing...{t}")
-
-    # global _fig, _ax_1, _ax_2, _ax_3, _ax_4, _ax_5, _ax_6
-
-    # # Create the figure only once
-    # if _fig is None:
-    #     # _fig, _ax_1 = plt.subplots(1, 1, figsize=(10, 4))
-    #     _fig, axes = plt.subplots(2, 3, figsize=(10, 4))
-    #     _ax_1, _ax_2, _ax_3, _ax_4, _ax_5, _ax_6 = axes.flatten()
-    #     _ax_1.set_title(f"Wheel {t} s")
-    #     _ax_1.set_aspect("equal")
-    #     _ax_2.set_title("Y Forces")
-    #     _ax_3.set_title("Q Forces")
-    #     _ax_4.set_title("Rail Position")
-    #     _ax_5.set_title("Wheelset y Position")
-    #     _ax_6.set_title("Rail Position")
-    #     # _ax_2.set_aspect("equal")
-    #     plt.show()
-
-    # # Clear the old plots
-    # _ax_1.cla()
-    # _ax_2.cla()
-    # _ax_3.cla()
-    # _ax_4.cla()
-    # _ax_5.cla()
-    # _ax_6.cla()
-
-    # # Plot wheel geometry
-    # _ax_1.plot(rails[1].rail_profile_pos[:, 0], rails[1].rail_profile_pos[:, 1], c="r")
-    # _ax_1.plot(wheels[1].wheel_profile_pos[:, 0], wheels[1].wheel_profile_pos[:, 1], c="black")
-    # _ax_1.plot(rails[0].rail_profile_pos[:, 0], rails[0].rail_profile_pos[:, 1], c="r")
-    # _ax_1.plot(wheels[0].wheel_profile_pos[:, 0], wheels[0].wheel_profile_pos[:, 1], c="black")
-    # _ax_1.set_title(f"Wheel {t} s")
-    # _ax_1.set_aspect("equal")
-
-    # # Plot rail geometry (select correct rail)
-    # _ax_2.plot(Y_forces_series)
-    # _ax_2.grid(True)
-    # _ax_2.set_title("Y Forces")
-    # # _ax_2.set_aspect("equal")
-
-    # # Plot Q forces
-    # _ax_3.plot(Q_forces_series)
-    # _ax_3.grid(True)
-    # _ax_3.set_title("Q Forces")
-    
-    # # Plot rail pos
-    # _ax_4.plot(rail_position)
-    # _ax_4.grid(True)
-    # _ax_4.set_title("Rail Position")
-    
-    # # Plot rail pos
-    # _ax_5.plot(np.array(Wheelset_y_position)-np.array(rail_position))
-    # _ax_5.grid(True)
-    # _ax_5.set_title("Wheelset y Position")
-
-    # # Plot rail pos
-    # _ax_6.plot(Wheelset_z_position)
-    # _ax_6.grid(True)
-    # _ax_6.set_title("Wheelset z Position")
-    # # _ax_3.set_aspect("equal")
-
-    # # Refresh only
-    # _fig.canvas.draw()
-    # fig.canvas.flush_events()
 
     return dx#, F_vector, force_vector_series, slip_series, creep_series, variable_series
 
@@ -342,7 +263,7 @@ contact_eqs = [
 material_model = material()
 
 kalker_tables = kalker_coefficients(material_properties=material_model)
-fastsim_patch = fastsim(discratization=10)
+fastsim_patch = fastsim(discratization=58)
 
 wheelset_mass = 1200.0
 I_x = 110.0
@@ -356,7 +277,7 @@ patches_per_deltays_eq, result_state_pressure_eq = static_contact(
     contact_eqs[0],
     material_model,
     Q_solve=wheelset_mass * 9.81 / 2,
-    discretization=10
+    discretization=58
 )
 
 print(patches_per_deltays_eq["patch_0"][0][0])
@@ -375,7 +296,7 @@ input()
 
 x0 = np.zeros(12)
 x0[2] = patches_per_deltays_eq["patch_0"][0][0]
-x0[6] = 10 / 3.6
+x0[6] = 20 / 3.6
 x0[9] = -x0[6]/wheels[0].r0
 
 mass_vector = np.array([wheelset_mass, wheelset_mass, wheelset_mass, I_x, I_y, I_z])
@@ -389,12 +310,12 @@ print(f"Total simulation time: {tspan[1]} s with time step: {dt} s, with vehicle
 
 t_eval = np.linspace(tspan[0], tspan[1], int(tspan[1] / dt))
 
-d_impulse = 0.01e-3  # max displacement
+d_impulse = 10e-3  # max displacement
 ds = 1e-5
 d_eval = np.arange(0, d_max + ds, ds)
 
 ramp_start = 1
-ramp_end = 3
+ramp_end = 2
 start_index = int(ramp_start / ds)
 end_index = int(ramp_end / ds)
 
@@ -402,32 +323,38 @@ ramp_length = end_index - start_index
 
 rail_y = np.zeros_like(d_eval)
 
-# 1. Smooth ramp up
 rail_y[start_index:end_index] = d_impulse * 0.5 * (1 - np.cos(np.pi * np.linspace(0, 1, ramp_length)))
-
-# 2. Smooth transition from peak to trough
-rail_y[end_index:end_index + ramp_length * 2] = d_impulse * np.cos(np.pi * np.linspace(0, 1, ramp_length * 2))
-
-# 3. Smooth ramp from trough back to zero
-rail_y[end_index + ramp_length * 2:end_index + ramp_length * 3] = -d_impulse * 0.5 * (1 + np.cos(np.pi * np.linspace(0, 1, ramp_length)))
-# rail_y[ramp_end*2:] = 0,0
+rail_y[end_index:] = d_impulse
+# rail_y[end_index:end_index + ramp_length * 2] = d_impulse * np.cos(np.pi * np.linspace(0, 1, ramp_length * 2))
+# rail_y[end_index + ramp_length * 2:end_index + ramp_length * 3] = -d_impulse * 0.5 * (1 + np.cos(np.pi * np.linspace(0, 1, ramp_length)))
 
 rail_y_interpolator = PchipInterpolator(d_eval, rail_y)
+d_eval_prova = np.arange(0, d_max + 1e-3, 1e-3)
+prova_rail = rail_y_interpolator(d_eval_prova)
 fig, ax = plt.subplots()
 ax.plot(d_eval, rail_y)
+ax.plot(d_eval_prova, prova_rail, "--")
+plt.show()
+
+fig, ax = plt.subplots()
+rails[0].calculate_position(rail_y[0], 0)
+ax.plot(rails[0].rail_profile_pos[:, 0], rails[0].rail_profile_pos[:, 1])
+rails[0].calculate_position(rail_y[end_index - 1], 0)
+ax.plot(rails[0].rail_profile_pos[:, 0], rails[0].rail_profile_pos[:, 1])
+rails[0].calculate_position(rail_y[-1], 0)
+ax.plot(rails[0].rail_profile_pos[:, 0], rails[0].rail_profile_pos[:, 1])
+plt.show()
+
+fig, ax = plt.subplots()
+rails[1].calculate_position(rail_y[0], 0)
+ax.plot(rails[1].rail_profile_pos[:, 0], rails[1].rail_profile_pos[:, 1])
+rails[1].calculate_position(rail_y[end_index - 1], 0)
+ax.plot(rails[1].rail_profile_pos[:, 0], rails[1].rail_profile_pos[:, 1])
+rails[1].calculate_position(rail_y[-1], 0)
+ax.plot(rails[1].rail_profile_pos[:, 0], rails[1].rail_profile_pos[:, 1])
 plt.show()
 
 input()
-
-# plt.ion()
-
-# _fig = None
-# _ax_1 = None
-# _ax_2 = None
-# _ax_3 = None
-# _ax_4 = None
-# _ax_5 = None
-# _ax_6 = None
 
 with tqdm(total=tspan[1], unit="s", desc="Simulation Progress") as pbar:
     last_t = [0]
@@ -444,7 +371,7 @@ with tqdm(total=tspan[1], unit="s", desc="Simulation Progress") as pbar:
         tspan,
         x0,
         t_eval=t_eval,
-        method="Radau",
+        method="RK45",
         max_step=dt,
         args=(
             wheels,
@@ -457,9 +384,6 @@ with tqdm(total=tspan[1], unit="s", desc="Simulation Progress") as pbar:
             rail_y_interpolator,
         ),  # pass extra parameters
     )
-
-# # plt.ioff()  # Turn off interactive mode
-# # plt.show()  # Keep final plot open
 
 fig, axes = plt.subplots(2, 3, figsize=(12, 8))
 axes = axes.flatten()
@@ -476,6 +400,87 @@ for i, ax in enumerate(axes):
 
 fig.tight_layout()
 plt.show()
+
+fig, ax = plt.subplots(ncols=2, figsize=(12, 6))
+
+def update(i):
+    ax[0].cla()  # clear axes each frame
+    ax[1].cla()  # clear axes each frame
+
+    wheels = [wheel(), wheel(lr=LEFT)]
+    rails = [rail(rail_inclination=20), rail(lr=LEFT, rail_inclination=20)]
+    
+    t = sol.t[i]
+    x = sol.y[:, i]
+
+    new_state = dynamic_state(
+        state_x=x[0], state_y=x[1], state_z=x[2],
+        state_pitch=x[3], state_yaw=x[4], state_roll=x[5],
+        state_v_x=x[6], state_v_y=x[7], state_v_z=x[8],
+        state_v_pitch=x[9], state_v_yaw=x[10], state_v_roll=x[11],
+    )
+
+    y_rail = rail_y_interpolator(x[0])
+
+    for index, wheel_x in enumerate(wheels):
+        wheel_x.set_dynamic_state(new_state)
+        wheel_x.calculate_position()
+        rails[index].calculate_position(y_rail, 0)
+
+    ax[0].plot(rails[1].rail_profile_pos[:, 0], rails[1].rail_profile_pos[:, 1], c="r")
+    ax[0].plot(wheels[1].wheel_profile_pos[:, 0], wheels[1].wheel_profile_pos[:, 1], c="black")
+    ax[1].plot(rails[0].rail_profile_pos[:, 0], rails[0].rail_profile_pos[:, 1], c="r")
+    ax[1].plot(wheels[0].wheel_profile_pos[:, 0], wheels[0].wheel_profile_pos[:, 1], c="black")
+    ax[0].set_title(f"t = {t:.4f} s")
+    ax[1].set_title(f"t = {t:.4f} s")
+    ax[0].set_aspect("equal")
+    ax[1].set_aspect("equal")
+
+frames = range(0, len(sol.t), 100)
+ani = FuncAnimation(fig, update, frames=frames, interval=50)
+plt.show()
+
+# fig, ax = plt.subplots()
+# for i in range(0,len(sol.t), 100):
+
+#     print(i)
+#     t = sol.t[i]
+#     x = sol.y[:, i]
+
+#     new_state = dynamic_state(
+#         state_x=x[0],
+#         state_y=x[1],
+#         state_z=x[2],
+#         state_pitch=x[3],
+#         state_yaw=x[4],
+#         state_roll=x[5],
+#         state_v_x=x[6],
+#         state_v_y=x[7],
+#         state_v_z=x[8],
+#         state_v_pitch=x[9],
+#         state_v_yaw=x[10],
+#         state_v_roll=x[11],
+#     )
+
+#     y_rail = rail_y_interpolator(x[0])
+#     print(y_rail, x[0])
+
+#     for index, wheel_x in enumerate(wheels):
+
+#         wheel_x.set_dynamic_state(new_state)
+#         wheel_x.calculate_position()
+
+#         rails[index].calculate_position(y_rail, 0)
+
+#     # Plot wheel geometry
+#     ax.plot(rails[1].rail_profile_pos[:, 0], rails[1].rail_profile_pos[:, 1], c="r")
+#     ax.plot(wheels[1].wheel_profile_pos[:, 0], wheels[1].wheel_profile_pos[:, 1], c="black")
+#     ax.plot(rails[0].rail_profile_pos[:, 0], rails[0].rail_profile_pos[:, 1], c="r")
+#     ax.plot(wheels[0].wheel_profile_pos[:, 0], wheels[0].wheel_profile_pos[:, 1], c="black")
+#     ax.set_title(f"Wheel {t} s")
+#     ax.set_aspect("equal")
+
+# plt.show()
 
 input()
 
